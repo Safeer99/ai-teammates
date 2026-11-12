@@ -1,29 +1,27 @@
 import { auth } from "@clerk/nextjs/server"
 import { PlusIcon } from "lucide-react"
 
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { ChatAvatar } from "@/components/chat-avatar"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
   EmptyContent,
   EmptyDescription,
   EmptyHeader,
-  EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
+
+export const dynamic = "force-dynamic"
 
 export default async function Page() {
   await auth.protect()
 
+  const seed = crypto.randomUUID()
+
   return (
     <Empty className="min-h-[calc(100vh-3.5rem)]">
       <EmptyHeader>
-        <EmptyMedia>
-          <Avatar size="lg" className="size-10">
-            <AvatarImage src="/favicon.ico" alt="Bot avatar" />
-            <AvatarFallback>🤖</AvatarFallback>
-          </Avatar>
-        </EmptyMedia>
+        <ChatAvatar seed={seed} className="mb-2 size-10" />
         <EmptyTitle className="text-base font-medium">
           Meet your first bot
         </EmptyTitle>
