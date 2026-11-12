@@ -64,3 +64,26 @@ thing:
 Only JavaScript and the HTTP API have a pre-10 form. The other six cores were
 released in 2026 and never had one, so any older-looking PHP, Python, Rust, Go,
 Dart or C# API attributed to DiceBear is invented rather than outdated.
+
+
+## Forms
+
+- **Validation & Schemas**:
+  - Use `drizzle-zod` (`createInsertSchema`) in `db/schema.ts` to derive insert schemas directly from Drizzle table definitions.
+  - Client-side form schemas must use `zod` and resolve via `@hookform/resolvers/zod`.
+  - Type-infer schemas with `z.infer<typeof schema>`.
+
+- **Server Actions (`action/<entity>.ts`)**:
+  - Always protect Server Actions using Clerk's `await auth()` from `@clerk/nextjs/server`. Check `isAuthenticated` and retrieve `userId` securely on the server. Never trust or accept `userId` from client form data.
+  - Validate payloads against the Drizzle insert schema (`insertSchema.parse({ ...data, userId })`) before inserting into the database.
+  - Call `revalidatePath(...)` after data mutations.
+
+- **React Hook Form & React Compiler**:
+  - Manage form state with `react-hook-form` and `zodResolver`.
+  - Do NOT call `watch("fieldName")` directly in component render bodies — React Compiler flags this because `useForm()`'s `watch` returns functions that cannot be memoized safely. Always use `useWatch({ control, name: "fieldName" })` instead.
+  - Provide inline error messages below fields and wire `aria-invalid={!!errors[fieldName]}` to inputs.
+  - Handle submission states using `formState: { isSubmitting }` to disable buttons and display loading indicators.
+
+- **Dialog / Modal Form Composition**:
+  - Forms rendered in dialogs should reset to default values and clear server errors when closed or dismissed.
+  - Support both controlled (`open`, `onOpenChange`) and trigger-based invocation.
