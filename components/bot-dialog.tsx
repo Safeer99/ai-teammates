@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { createBot } from "@/action/bot"
+import { toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 
 export const botFormSchema = z.object({
@@ -152,11 +153,23 @@ export function BotDialog({
         avatar: values.avatar,
       })
 
+      toast.add({
+        title: "Bot created",
+        description: `${values.name} was successfully created.`,
+        type: "success",
+      })
+
       handleOpenChange(false)
       onSuccess?.()
     } catch (err) {
       console.error("Failed to create bot:", err)
-      setServerError(err instanceof Error ? err.message : "Failed to create bot")
+      const message = err instanceof Error ? err.message : "Failed to create bot"
+      setServerError(message)
+      toast.add({
+        title: "Failed to create bot",
+        description: message,
+        type: "error",
+      })
     }
   }
 
