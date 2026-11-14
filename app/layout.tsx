@@ -6,7 +6,6 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/toast"
-import { Header } from "@/components/header"
 import { cn } from "@/lib/utils"
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" })
@@ -36,7 +35,6 @@ export default function RootLayout({
         <ClerkProvider appearance={{ theme: shadcn }}>
           <ThemeProvider>
             <TooltipProvider>
-              <Header />
               <main>{children}</main>
               <Toaster />
             </TooltipProvider>
