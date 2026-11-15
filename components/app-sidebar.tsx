@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useParams, usePathname, useRouter } from "next/navigation"
 import { formatDistanceToNowStrict } from "date-fns"
 import { PlusIcon, SearchIcon, UsersIcon } from "lucide-react"
 import { UserButton } from "@clerk/nextjs"
@@ -47,8 +47,21 @@ export interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
 
 export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
   const router = useRouter()
+  const pathname = usePathname()
+  const params = useParams()
   const [botDialogOpen, setBotDialogOpen] = React.useState(false)
   const [commandOpen, setCommandOpen] = React.useState(false)
+  const activeItemRef = React.useRef<HTMLLIElement | null>(null)
+
+  const activeChatId =
+    (params?.chatId as string | undefined) ||
+    (pathname?.startsWith("/chats/") ? pathname.split("/")[2] : undefined)
+
+  React.useEffect(() => {
+    if (activeItemRef.current) {
+      activeItemRef.current.scrollIntoView({ block: "nearest" })
+    }
+  }, [activeChatId])
 
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -68,14 +81,17 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
         <div className="flex w-full items-center justify-end group-data-[collapsible=icon]:justify-center">
           <DropdownMenu>
             <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" size="icon" className="size-8" />
-              }
+              render={<Button variant="ghost" size="icon" className="size-8" />}
             >
               <PlusIcon className="size-4" />
               <span className="sr-only">Create</span>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" side="bottom" sideOffset={4} className="w-48">
+            <DropdownMenuContent
+              align="end"
+              side="bottom"
+              sideOffset={4}
+              className="w-48"
+            >
               <DropdownMenuGroup>
                 <DropdownMenuItem onClick={() => setBotDialogOpen(true)}>
                   <PlusIcon />
@@ -122,7 +138,8 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
             <SidebarMenu className="gap-2 group-data-[collapsible=icon]:gap-2">
               {chats.map((chat) => {
                 const firstBot = chat.members[0]?.bot
-                const displayName = chat.name || firstBot?.name || "Untitled Chat"
+                const displayName =
+                  chat.name || firstBot?.name || "Untitled Chat"
                 const avatarSeed = firstBot?.avatar || firstBot?.id || chat.id
                 let formattedTime = ""
                 if (chat.lastMessageAt) {
@@ -135,13 +152,24 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
                   }
                 }
 
+                const isActive = chat.id === activeChatId
+
                 return (
-                  <SidebarMenuItem key={chat.id}>
+                  <SidebarMenuItem
+                    key={chat.id}
+                    ref={isActive ? activeItemRef : undefined}
+                  >
                     <SidebarMenuButton
                       size="lg"
                       tooltip={displayName}
-                      className="h-auto p-2 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center!"
-                      render={<Link href={`/chat/${chat.id}`} />}
+                      isActive={isActive}
+                      className="h-auto p-2 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center! group-data-[collapsible=icon]:p-0!"
+                      render={
+                        <Link
+                          href={`/chats/${chat.id}`}
+                          aria-current={isActive ? "page" : undefined}
+                        />
+                      }
                     >
                       <ChatAvatar
                         seed={avatarSeed}
@@ -178,13 +206,14 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
             <SidebarMenuButton
               size="lg"
               render={<div />}
-              className="h-auto p-0 hover:bg-transparent group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center!"
+              className="h-auto p-0 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center! group-data-[collapsible=icon]:p-0! hover:bg-transparent"
             >
               <UserButton
                 showName
                 appearance={{
                   elements: {
-                    rootBox: "flex! w-full! group-data-[collapsible=icon]:justify-center!",
+                    rootBox:
+                      "flex! w-full! group-data-[collapsible=icon]:justify-center!",
                     userButtonTrigger:
                       "flex! h-8! w-full! items-center! justify-start! gap-2! overflow-hidden! rounded-md! p-2! text-left! text-sm! text-sidebar-foreground! shadow-none! ring-sidebar-ring! outline-hidden! hover:bg-sidebar-accent! hover:text-sidebar-accent-foreground! focus-visible:ring-2! active:bg-sidebar-accent! active:text-sidebar-accent-foreground! aria-expanded:bg-sidebar-accent! aria-expanded:text-sidebar-accent-foreground! group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-0! group-data-[collapsible=icon]:justify-center!",
                     userButtonBox:
@@ -214,7 +243,8 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
             <CommandGroup heading="Chats">
               {chats.map((chat) => {
                 const firstBot = chat.members[0]?.bot
-                const displayName = chat.name || firstBot?.name || "Untitled Chat"
+                const displayName =
+                  chat.name || firstBot?.name || "Untitled Chat"
                 const avatarSeed = firstBot?.avatar || firstBot?.id || chat.id
                 let formattedTime = ""
                 if (chat.lastMessageAt) {
@@ -233,7 +263,7 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
                     value={`${displayName} ${chat.lastMessagePreview ?? ""}`}
                     onSelect={() => {
                       setCommandOpen(false)
-                      router.push(`/chat/${chat.id}`)
+                      router.push(`/chats/${chat.id}`)
                     }}
                     className="flex cursor-pointer items-center gap-2 p-2"
                   >

@@ -2,6 +2,7 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { revalidatePath } from "next/cache"
+import { and, eq, inArray } from "drizzle-orm"
 import { nanoid } from "nanoid"
 
 import { db } from "@/db"
@@ -67,4 +68,86 @@ export async function createBot(data: CreateBotInput) {
     chat: newChat,
     member: newMember,
   }
+}
+
+export type UpdateBotInput = {
+  id: string
+  name: string
+  job: string
+  instructions?: string | null
+  avatar?: string
+}
+
+export async function updateBot(data: UpdateBotInput) {
+  const { isAuthenticated, userId } = await auth()
+
+  if (!isAuthenticated || !userId) {
+    throw new Error("Unauthorized")
+  }
+
+  const validatedBot = insertBotSchema.parse({
+    ...data,
+    userId,
+  })
+
+  const [updatedBot] = await db
+    .update(bots)
+    .set({
+      name: validatedBot.name,
+      job: validatedBot.job,
+      instructions: validatedBot.instructions,
+      avatar: validatedBot.avatar,
+    })
+    .where(and(eq(bots.id, data.id), eq(bots.userId, userId)))
+    .returning()
+
+  if (!updatedBot) {
+    throw new Error("Bot not found or unauthorized")
+  }
+
+  revalidatePath("/", "layout")
+
+  return updatedBot
+}
+
+export async function deleteBot(botId: string) {
+  const { isAuthenticated, userId } = await auth()
+
+  if (!isAuthenticated || !userId) {
+    throw new Error("Unauthorized")
+  }
+
+  // Find direct chats where this bot is a member
+  const members = await db.query.chatMembers.findMany({
+    where: (cm, { eq }) => eq(cm.botId, botId),
+  })
+
+  const chatIds = members.map((m) => m.chatId)
+
+  // Delete the bot scoped to userId
+  const [deletedBot] = await db
+    .delete(bots)
+    .where(and(eq(bots.id, botId), eq(bots.userId, userId)))
+    .returning()
+
+  if (!deletedBot) {
+    throw new Error("Bot not found or unauthorized")
+  }
+
+  // Also delete associated direct chats belonging to this user
+  if (chatIds.length > 0) {
+    await db
+      .delete(chats)
+      .where(
+        and(
+          inArray(chats.id, chatIds),
+          eq(chats.userId, userId),
+          eq(chats.kind, "direct")
+        )
+      )
+  }
+
+  revalidatePath("/", "layout")
+
+  return deletedBot
 }
