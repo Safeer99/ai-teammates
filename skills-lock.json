@@ -8,6 +8,13 @@
       "skillPath": "skills/ai-elements/SKILL.md",
       "computedHash": "e92b5aca35680ce4a8ed672ae9d8d8b58335e7fd48e3321911590882a7e7f619"
     },
+    "ai-sdk": {
+      "source": "vercel/ai",
+      "commit": "8ba3940d3dd1f3cd3c4365bbaec505c6ef0eb1e3",
+      "sourceType": "github",
+      "skillPath": "skills/use-ai-sdk/SKILL.md",
+      "computedHash": "59cd2dc82c5458f2819992fc3d27204ed16edfc9170870c6f8f04c44bac17772"
+    },
     "clerk": {
       "source": "clerk/skills",
       "sourceType": "github",
@@ -127,6 +134,13 @@
       "sourceType": "github",
       "skillPath": "skills/clerk-webhooks/SKILL.md",
       "computedHash": "ae63ced36e71c88cd2d38995a5a446031b41df7ab8ecbf1dd62f31147c614b15"
+    },
+    "migrate-ai-sdk-v6-to-v7": {
+      "source": "vercel/ai",
+      "commit": "8ba3940d3dd1f3cd3c4365bbaec505c6ef0eb1e3",
+      "sourceType": "github",
+      "skillPath": "skills/migrate-ai-sdk-v6-to-v7/SKILL.md",
+      "computedHash": "1b2e1de680feb538876987eaa8bbbb137c697a6eb841e38f8bd0d6a7dd5b19d3"
     },
     "migrate-radix-to-base": {
       "source": "shadcn/ui",
