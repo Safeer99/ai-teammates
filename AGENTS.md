@@ -87,3 +87,9 @@ Dart or C# API attributed to DiceBear is invented rather than outdated.
 - **Dialog / Modal Form Composition**:
   - Forms rendered in dialogs should reset to default values and clear server errors when closed or dismissed.
   - Support both controlled (`open`, `onOpenChange`) and trigger-based invocation.
+
+<!-- TRIGGER.DEV SKILLS START -->
+## Trigger.dev agent skills
+
+This project has Trigger.dev agent skills installed in `.agents/skills/`. Before writing or changing Trigger.dev code (background tasks, scheduled tasks, realtime, or chat.agent AI agents), load the most relevant skill: `trigger-authoring-chat-agent`, `trigger-authoring-tasks`, `trigger-chat-agent-advanced`, `trigger-cost-savings`, `trigger-getting-started`, `trigger-realtime-and-frontend`.
+<!-- TRIGGER.DEV SKILLS END -->
