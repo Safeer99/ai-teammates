@@ -2,8 +2,18 @@
 
 import { useState } from "react"
 import { useChat } from "@ai-sdk/react"
+import {
+  useLoadTranscript,
+  useTriggerChatTransport,
+} from "@trigger.dev/sdk/chat/react"
+import type { UIMessage } from "ai"
 import { MessageSquareIcon } from "lucide-react"
 
+import {
+  loadTranscript,
+  mintChatAccessToken,
+  startChatSession,
+} from "@/action/chat"
 import {
   Conversation,
   ConversationContent,
@@ -26,6 +36,7 @@ import {
 } from "@/components/ai-elements/prompt-input"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { Spinner } from "@/components/ui/spinner"
+import type { chatAgent } from "@/trigger/chat"
 
 export interface ChatViewProps {
   chatId: string
@@ -34,9 +45,60 @@ export interface ChatViewProps {
 }
 
 export function ChatView({ chatId, name, avatarSeed }: ChatViewProps) {
+  const transport = useTriggerChatTransport<typeof chatAgent>({
+    task: "chat-agent",
+    accessToken: ({ chatId }) => mintChatAccessToken(chatId),
+    startSession: ({ chatId, clientData }) =>
+      startChatSession({ chatId, clientData }),
+  })
+
+  const { messages: initialMessages, isLoading } = useLoadTranscript(
+    chatId,
+    loadTranscript,
+    { transport }
+  )
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-1 items-center justify-center">
+        <Spinner className="size-6 text-muted-foreground" />
+      </div>
+    )
+  }
+
+  return (
+    <ChatContent
+      key={chatId}
+      chatId={chatId}
+      name={name}
+      avatarSeed={avatarSeed}
+      initialMessages={initialMessages}
+      transport={transport}
+    />
+  )
+}
+
+interface ChatContentProps {
+  chatId: string
+  name?: string | null
+  avatarSeed?: string
+  initialMessages: UIMessage[]
+  transport: ReturnType<typeof useTriggerChatTransport<typeof chatAgent>>
+}
+
+function ChatContent({
+  chatId,
+  name,
+  avatarSeed,
+  initialMessages,
+  transport,
+}: ChatContentProps) {
   const [input, setInput] = useState("")
   const { messages, sendMessage, status, stop, error } = useChat({
     id: chatId,
+    messages: initialMessages,
+    transport,
+    resume: initialMessages.length > 0,
   })
 
   const handleSubmit = (message: PromptInputMessage) => {
