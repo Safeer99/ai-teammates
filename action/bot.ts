@@ -6,6 +6,7 @@ import { and, eq, inArray } from "drizzle-orm"
 import { nanoid } from "nanoid"
 
 import { db } from "@/db"
+import { getDaytonaClient } from "@/lib/daytona"
 import {
   bots,
   chats,
@@ -29,6 +30,9 @@ export async function createBot(data: CreateBotInput) {
     throw new Error("Unauthorized")
   }
 
+  const daytona = getDaytonaClient()
+  const sandbox = await daytona.create()
+
   const botId = nanoid()
   const chatId = nanoid()
 
@@ -37,6 +41,7 @@ export async function createBot(data: CreateBotInput) {
     id: botId,
     avatar: data.avatar || nanoid(),
     userId,
+    sandboxId: sandbox.id,
   })
 
   const validatedChat = insertChatSchema.parse({
@@ -51,11 +56,24 @@ export async function createBot(data: CreateBotInput) {
     botId,
   })
 
-  const [botRows, chatRows, memberRows] = await db.batch([
-    db.insert(bots).values(validatedBot).returning(),
-    db.insert(chats).values(validatedChat).returning(),
-    db.insert(chatMembers).values(validatedMember).returning(),
-  ])
+  let botRows, chatRows, memberRows
+  try {
+    ;[botRows, chatRows, memberRows] = await db.batch([
+      db.insert(bots).values(validatedBot).returning(),
+      db.insert(chats).values(validatedChat).returning(),
+      db.insert(chatMembers).values(validatedMember).returning(),
+    ])
+  } catch (error) {
+    try {
+      await sandbox.delete()
+    } catch (cleanupError) {
+      console.error(
+        "Failed to clean up sandbox after db insertion failure:",
+        cleanupError
+      )
+    }
+    throw error
+  }
 
   const newBot = botRows[0]
   const newChat = chatRows[0]
@@ -132,6 +150,17 @@ export async function deleteBot(botId: string) {
 
   if (!deletedBot) {
     throw new Error("Bot not found or unauthorized")
+  }
+
+  // Delete associated Daytona sandbox if one exists
+  if (deletedBot.sandboxId) {
+    try {
+      const daytona = getDaytonaClient()
+      const sandbox = await daytona.get(deletedBot.sandboxId)
+      await sandbox.delete()
+    } catch (error) {
+      console.error("Failed to delete Daytona sandbox:", error)
+    }
   }
 
   // Also delete associated direct chats belonging to this user
