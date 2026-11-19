@@ -6,7 +6,7 @@ export const chatAgent = chat.agent({
   storage: defaultStorage,
   run: async ({ messages, signal, streamText }) =>
     streamText({
-      model: google("gemini-3.8-flash"),
+      model: google("gemini-4-hydrogen"),
       messages,
       abortSignal: signal,
     }),
