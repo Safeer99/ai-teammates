@@ -1,7 +1,7 @@
 import { cookies } from "next/headers"
 
 import { AppSidebar } from "@/components/app-sidebar"
-import { SidebarProvider } from "@/components/ui/sidebar"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { getUserChats } from "@/queries/bots"
 
 export default async function DashboardLayout({
@@ -16,9 +16,11 @@ export default async function DashboardLayout({
   const chats = await getUserChats()
 
   return (
-    <SidebarProvider defaultOpen={defaultOpen}>
+    <SidebarProvider defaultOpen={defaultOpen} className="h-svh max-h-svh overflow-hidden">
       <AppSidebar chats={chats} />
-      {children}
+      <SidebarInset className="h-svh max-h-svh min-w-0 overflow-hidden">
+        {children}
+      </SidebarInset>
     </SidebarProvider>
   )
 }

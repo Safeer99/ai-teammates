@@ -278,8 +278,8 @@ function ChatContent({
   const isGenerating = status === "submitted" || status === "streaming"
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
-      <Conversation className="flex-1">
+    <div className="flex h-full w-full flex-1 flex-col min-h-0 min-w-0 overflow-hidden">
+      <Conversation className="flex-1 min-h-0 min-w-0 w-full overflow-hidden">
         <ConversationContent className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
           {messages.length === 0 ? (
             <ConversationEmptyState

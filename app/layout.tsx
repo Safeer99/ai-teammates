@@ -35,7 +35,7 @@ export default function RootLayout({
         <ClerkProvider appearance={{ theme: shadcn }}>
           <ThemeProvider>
             <TooltipProvider>
-              <main>{children}</main>
+              <main className="h-svh max-h-svh w-full overflow-hidden">{children}</main>
               <Toaster />
             </TooltipProvider>
           </ThemeProvider>

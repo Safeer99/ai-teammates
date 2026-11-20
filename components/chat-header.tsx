@@ -1,9 +1,12 @@
+"use client"
+
 import * as React from "react"
 import { MonitorIcon } from "lucide-react"
 
 import { BotDialog } from "@/components/bot-dialog"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { Button } from "@/components/ui/button"
+import { useParentGroup } from "@/components/ui/resizable"
 import type { ChatWithMembers } from "@/queries/chats"
 
 export interface ChatHeaderProps {
@@ -11,12 +14,57 @@ export interface ChatHeaderProps {
 }
 
 export function ChatHeader({ chat }: ChatHeaderProps) {
+  const group = useParentGroup()
+  const [isOpen, setIsOpen] = React.useState(false)
+  const lastSizeRef = React.useRef(35)
+
+  React.useEffect(() => {
+    const el = document.getElementById("chat-desktop")
+    if (!el) return
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width
+        const open = width > 10
+        setIsOpen(open)
+        if (open) {
+          const groupEl = el.parentElement
+          if (groupEl && groupEl.offsetWidth > 0) {
+            const pct = Math.round((width / groupEl.offsetWidth) * 100)
+            if (pct >= 15) {
+              lastSizeRef.current = pct
+            }
+          }
+        }
+      }
+    })
+
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  const handleToggle = () => {
+    if (!group) return
+    const layout = group.getLayout()
+    const currentSize = layout["chat-desktop"] ?? 0
+    if (currentSize > 0) {
+      lastSizeRef.current = currentSize
+      group.setLayout({ "chat-main": 100, "chat-desktop": 0 })
+    } else {
+      const nextSize = lastSizeRef.current > 0 ? lastSizeRef.current : 35
+      group.setLayout({
+        "chat-main": 100 - nextSize,
+        "chat-desktop": nextSize,
+      })
+    }
+  }
+
   const firstBot = chat.members[0]?.bot
   const displayName = chat.name || firstBot?.name || "Untitled Chat"
   const avatarSeed = firstBot?.avatar || firstBot?.id || chat.id
 
   return (
-    <header className="flex h-12 w-full items-center justify-between border-b border-border/50 bg-background px-4">
+    <header className="sticky top-0 z-10 flex h-12 w-full shrink-0 items-center justify-between border-b border-border/50 bg-background px-4">
       <div className="flex min-w-0 items-center">
         {firstBot ? (
           <BotDialog bot={firstBot}>
@@ -43,12 +91,14 @@ export function ChatHeader({ chat }: ChatHeaderProps) {
       <div className="flex items-center">
         <Button
           type="button"
-          variant="ghost"
+          variant={isOpen ? "secondary" : "ghost"}
           size="icon"
+          aria-pressed={isOpen}
+          onClick={handleToggle}
           className="size-8 text-muted-foreground hover:text-foreground"
         >
-          <MonitorIcon className="size-4" />
-          <span className="sr-only">Desktop</span>
+          <MonitorIcon />
+          <span className="sr-only">Toggle desktop panel</span>
         </Button>
       </div>
     </header>
