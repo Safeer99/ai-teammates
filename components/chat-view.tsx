@@ -294,13 +294,15 @@ function ChatContent({
               description="Type a message below to begin chatting."
             />
           ) : (
-            messages.map((message) => (
-              <Message from={message.role} key={message.id}>
+            messages.map((message, messageIndex) => (
+              <Message from={message.role} key={`${message.id}-${messageIndex}`}>
                 <MessageContent>
-                  {message.parts.map((part, index) => {
+                  {message.parts.map((part, partIndex) => {
                     if (part.type === "text") {
                       return (
-                        <MessageResponse key={`${message.id}-${index}`}>
+                        <MessageResponse
+                          key={`${message.id}-${messageIndex}-${partIndex}`}
+                        >
                           {part.text}
                         </MessageResponse>
                       )
@@ -332,7 +334,7 @@ function ChatContent({
                       ) {
                         return (
                           <ScreenViewPart
-                            key={`${message.id}-${index}`}
+                            key={`${message.id}-${messageIndex}-${partIndex}`}
                             part={genericPart}
                           />
                         )
@@ -341,7 +343,7 @@ function ChatContent({
                       // Generic tool call rendering
                       return (
                         <ToolCallPart
-                          key={`${message.id}-${index}`}
+                          key={`${message.id}-${messageIndex}-${partIndex}`}
                           part={genericPart}
                         />
                       )

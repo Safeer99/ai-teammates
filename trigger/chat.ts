@@ -6,16 +6,19 @@ import { db } from "../db"
 import { getDaytonaClient } from "../lib/daytona"
 import { createComputerUseTools } from "./tools"
 
-function buildSystemPrompt(bot?: {
-  name: string
-  job: string
-  instructions?: string | null
-  sandboxId?: string | null
-} | null) {
+function buildSystemPrompt(
+  bot?: {
+    name: string
+    job: string
+    instructions?: string | null
+    sandboxId?: string | null
+  } | null
+) {
   const name = bot?.name || "AI Teammate"
   const job = bot?.job || "AI Assistant"
   const customInstructions =
-    bot?.instructions?.trim() || `Assist the user effectively in your role as ${job}.`
+    bot?.instructions?.trim() ||
+    `Assist the user effectively in your role as ${job}.`
   const sandboxInfo = bot?.sandboxId
     ? `You are situated in an isolated Daytona cloud sandbox environment with ID: ${bot.sandboxId}.`
     : `You are situated in an isolated Daytona cloud sandbox environment.`
@@ -72,7 +75,11 @@ async function getSandboxForChat(chatId: string) {
       return null
     }
     const daytona = getDaytonaClient()
-    return await daytona.get(bot.sandboxId)
+    const sandbox = await daytona.get(bot.sandboxId)
+    if (sandbox.state !== "started") {
+      await sandbox.start()
+    }
+    return sandbox
   } catch (error) {
     console.error("Failed to retrieve sandbox for chat:", error)
     return null
@@ -106,9 +113,13 @@ export const chatAgent = chat.agent({
     }
 
     const system = buildSystemPrompt(bot)
+    const modelName =
+      process.env.GOOGLE_GENERATIVE_AI_MODEL ||
+      process.env.AI_MODEL ||
+      "gemini-3.5-flash-lite"
 
     return streamText({
-      model: google("gemini-4-hydrogen"),
+      model: google(modelName),
       system,
       messages,
       tools,
