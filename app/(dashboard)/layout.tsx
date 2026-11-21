@@ -2,7 +2,7 @@ import { cookies } from "next/headers"
 
 import { AppSidebar } from "@/components/app-sidebar"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
-import { getUserChats } from "@/queries/bots"
+import { getUserBots, getUserChats } from "@/queries/bots"
 
 export default async function DashboardLayout({
   children,
@@ -13,11 +13,14 @@ export default async function DashboardLayout({
   const sidebarCookie = cookieStore.get("sidebar_state")?.value
   const defaultOpen = sidebarCookie ? sidebarCookie === "true" : true
 
-  const chats = await getUserChats()
+  const [chats, bots] = await Promise.all([getUserChats(), getUserBots()])
 
   return (
-    <SidebarProvider defaultOpen={defaultOpen} className="h-svh max-h-svh overflow-hidden">
-      <AppSidebar chats={chats} />
+    <SidebarProvider
+      defaultOpen={defaultOpen}
+      className="h-svh max-h-svh overflow-hidden"
+    >
+      <AppSidebar chats={chats} bots={bots} />
       <SidebarInset className="h-svh max-h-svh min-w-0 overflow-hidden">
         {children}
       </SidebarInset>

@@ -34,6 +34,15 @@ export async function getChatVncUrl(chatId: string): Promise<VncUrlResult> {
     throw new Error("Chat not found")
   }
 
+  if (chat.kind === "group") {
+    return {
+      url: null,
+      botName: chat.name || "Group",
+      sandboxId: null,
+      error: "Group chats do not support desktop preview.",
+    }
+  }
+
   const bot = chat.members[0]?.bot
   const botName = chat.name || bot?.name || "Assistant"
 

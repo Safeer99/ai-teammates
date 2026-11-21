@@ -29,9 +29,11 @@ export default async function Page({ params }: PageProps) {
     notFound()
   }
 
+  const isGroup = chat.kind === "group"
   const firstBot = chat.members[0]?.bot
   const displayName = chat.name || firstBot?.name || "Untitled Chat"
   const avatarSeed = firstBot?.avatar || firstBot?.id || chat.id
+  const bots = chat.members.map((m) => m.bot)
 
   return (
     <ResizablePanelGroup
@@ -50,21 +52,25 @@ export default async function Page({ params }: PageProps) {
               chatId={chatId}
               name={displayName}
               avatarSeed={avatarSeed}
+              isGroup={isGroup}
+              bots={bots}
             />
           </div>
         </div>
       </ResizablePanel>
-      <ResizableHandle />
-      <ResizablePanel
-        id="chat-desktop"
-        collapsible
-        defaultSize="0%"
-        minSize="20%"
-        maxSize="80%"
-        className="h-full min-w-0 overflow-hidden"
-      >
-        <VncPreview chatId={chatId} botName={displayName} />
-      </ResizablePanel>
+      {!isGroup && <ResizableHandle />}
+      {!isGroup && (
+        <ResizablePanel
+          id="chat-desktop"
+          collapsible
+          defaultSize="0%"
+          minSize="20%"
+          maxSize="80%"
+          className="h-full min-w-0 overflow-hidden"
+        >
+          <VncPreview chatId={chatId} botName={displayName} />
+        </ResizablePanel>
+      )}
     </ResizablePanelGroup>
   )
 }

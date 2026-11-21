@@ -9,6 +9,8 @@ import { UserButton } from "@clerk/nextjs"
 
 import { BotDialog } from "@/components/bot-dialog"
 import { ChatAvatar } from "@/components/chat-avatar"
+import { GroupChatAvatar } from "@/components/group-chat-avatar"
+import { GroupChatDialog } from "@/components/group-chat-dialog"
 import { Button } from "@/components/ui/button"
 import {
   Command,
@@ -39,17 +41,23 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
-import type { UserChat } from "@/queries/bots"
+import type { UserBot, UserChat } from "@/queries/bots"
 
 export interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   chats?: UserChat[]
+  bots?: UserBot[]
 }
 
-export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
+export function AppSidebar({
+  chats = [],
+  bots = [],
+  ...props
+}: AppSidebarProps) {
   const router = useRouter()
   const pathname = usePathname()
   const params = useParams()
   const [botDialogOpen, setBotDialogOpen] = React.useState(false)
+  const [groupDialogOpen, setGroupDialogOpen] = React.useState(false)
   const [commandOpen, setCommandOpen] = React.useState(false)
   const activeItemRef = React.useRef<HTMLLIElement | null>(null)
 
@@ -97,7 +105,7 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
                   <PlusIcon />
                   <span>Create new bot</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setGroupDialogOpen(true)}>
                   <UsersIcon />
                   <span>Create group chat</span>
                 </DropdownMenuItem>
@@ -137,6 +145,7 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
           <SidebarGroupContent>
             <SidebarMenu className="gap-2 group-data-[collapsible=icon]:gap-2">
               {chats.map((chat) => {
+                const isGroup = chat.kind === "group"
                 const firstBot = chat.members[0]?.bot
                 const displayName =
                   chat.name || firstBot?.name || "Untitled Chat"
@@ -171,10 +180,17 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
                         />
                       }
                     >
-                      <ChatAvatar
-                        seed={avatarSeed}
-                        className="size-8 shrink-0 group-data-[collapsible=icon]:size-6"
-                      />
+                      {isGroup ? (
+                        <GroupChatAvatar
+                          bots={chat.members.map((m) => m.bot)}
+                          className="size-8 shrink-0 group-data-[collapsible=icon]:size-6"
+                        />
+                      ) : (
+                        <ChatAvatar
+                          seed={avatarSeed}
+                          className="size-8 shrink-0 group-data-[collapsible=icon]:size-6"
+                        />
+                      )}
                       <div className="flex min-w-0 flex-1 flex-col gap-0.5 group-data-[collapsible=icon]:hidden">
                         <div className="flex items-center justify-between gap-1">
                           <span className="truncate text-sm font-semibold text-sidebar-foreground">
@@ -230,6 +246,11 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
       </SidebarFooter>
       <SidebarRail />
       <BotDialog open={botDialogOpen} onOpenChange={setBotDialogOpen} />
+      <GroupChatDialog
+        open={groupDialogOpen}
+        onOpenChange={setGroupDialogOpen}
+        bots={bots}
+      />
       <CommandDialog
         open={commandOpen}
         onOpenChange={setCommandOpen}
@@ -242,6 +263,7 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
             <CommandEmpty>No chats found.</CommandEmpty>
             <CommandGroup heading="Chats">
               {chats.map((chat) => {
+                const isGroup = chat.kind === "group"
                 const firstBot = chat.members[0]?.bot
                 const displayName =
                   chat.name || firstBot?.name || "Untitled Chat"
@@ -267,7 +289,17 @@ export function AppSidebar({ chats = [], ...props }: AppSidebarProps) {
                     }}
                     className="flex cursor-pointer items-center gap-2 p-2"
                   >
-                    <ChatAvatar seed={avatarSeed} className="size-8 shrink-0" />
+                    {isGroup ? (
+                      <GroupChatAvatar
+                        bots={chat.members.map((m) => m.bot)}
+                        className="size-8 shrink-0"
+                      />
+                    ) : (
+                      <ChatAvatar
+                        seed={avatarSeed}
+                        className="size-8 shrink-0"
+                      />
+                    )}
                     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <div className="flex items-center justify-between gap-1">
                         <span className="truncate text-sm font-semibold text-foreground">

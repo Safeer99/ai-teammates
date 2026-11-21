@@ -3,13 +3,74 @@
 import { auth as clerkAuth } from "@clerk/nextjs/server"
 import { auth as triggerAuth } from "@trigger.dev/sdk"
 import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
+import { nanoid } from "nanoid"
+import { revalidatePath } from "next/cache"
+import { z } from "zod"
 
+import { db } from "@/db"
+import {
+  chats,
+  chatMembers,
+  insertChatMemberSchema,
+  insertChatSchema,
+} from "@/db/schema"
 import { getChat } from "@/queries/chats"
 
 const rawStartChatSession = chat.createStartSessionAction("chat-agent")
 const rawLoadTranscript = chat.createLoadTranscriptAction(defaultStorage, {
   limit: 50,
 })
+
+const createGroupChatSchema = z.object({
+  name: z.string().min(1, "Group name is required"),
+  botIds: z.array(z.string()).min(1, "Please select at least one bot"),
+})
+
+export type CreateGroupChatInput = z.infer<typeof createGroupChatSchema>
+
+export async function createGroupChat(data: CreateGroupChatInput) {
+  const { isAuthenticated, userId } = await clerkAuth()
+  if (!isAuthenticated || !userId) {
+    throw new Error("Unauthorized")
+  }
+
+  const validated = createGroupChatSchema.parse(data)
+
+  // Verify all botIds belong to userId
+  const userBots = await db.query.bots.findMany({
+    where: (b, { and, eq, inArray }) =>
+      and(eq(b.userId, userId), inArray(b.id, validated.botIds)),
+  })
+
+  if (userBots.length !== validated.botIds.length) {
+    throw new Error("Some selected bots were not found or unauthorized")
+  }
+
+  const chatId = nanoid()
+
+  const validatedChat = insertChatSchema.parse({
+    id: chatId,
+    userId,
+    kind: "group",
+    name: validated.name,
+  })
+
+  const memberInserts = validated.botIds.map((botId) =>
+    insertChatMemberSchema.parse({
+      chatId,
+      botId,
+    })
+  )
+
+  await db.batch([
+    db.insert(chats).values(validatedChat),
+    ...memberInserts.map((m) => db.insert(chatMembers).values(m)),
+  ])
+
+  revalidatePath("/", "layout")
+
+  return { chatId }
+}
 
 export async function startChatSession(params: {
   chatId: string

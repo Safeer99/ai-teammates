@@ -70,6 +70,10 @@ async function getSandboxForChat(chatId: string) {
         },
       },
     })
+    // Group chats do not use desktop panel / sandbox
+    if (chatRecord?.kind === "group") {
+      return null
+    }
     const bot = chatRecord?.members[0]?.bot
     if (!bot?.sandboxId) {
       return null
@@ -93,8 +97,10 @@ export const chatAgent = chat.agent({
     const sandbox = await getSandboxForChat(chatId)
     return createComputerUseTools(sandbox)
   },
-  run: async ({ messages, tools, signal, streamText, chatId }) => {
+  run: async ({ messages, tools, signal, streamText, chatId, clientData }) => {
     let bot = null
+    const metadata = clientData as { selectedBotId?: string } | undefined
+    const selectedBotId = metadata?.selectedBotId
 
     try {
       const chatRecord = await db.query.chats.findFirst({
@@ -107,7 +113,16 @@ export const chatAgent = chat.agent({
           },
         },
       })
-      bot = chatRecord?.members[0]?.bot ?? null
+      if (chatRecord) {
+        if (chatRecord.kind === "group" && selectedBotId) {
+          bot =
+            chatRecord.members.find((m) => m.botId === selectedBotId)?.bot ??
+            chatRecord.members[0]?.bot ??
+            null
+        } else {
+          bot = chatRecord.members[0]?.bot ?? null
+        }
+      }
     } catch (error) {
       console.error("Failed to fetch bot details for system prompt:", error)
     }

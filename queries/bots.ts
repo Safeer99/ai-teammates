@@ -21,4 +21,18 @@ export async function getUserChats() {
   })
 }
 
+export async function getUserBots() {
+  const { userId } = await auth()
+
+  if (!userId) {
+    return []
+  }
+
+  return await db.query.bots.findMany({
+    where: (bots, { eq }) => eq(bots.userId, userId),
+    orderBy: (bots, { desc }) => [desc(bots.createdAt)],
+  })
+}
+
 export type UserChat = Awaited<ReturnType<typeof getUserChats>>[number]
+export type UserBot = Awaited<ReturnType<typeof getUserBots>>[number]
