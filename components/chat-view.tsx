@@ -8,7 +8,11 @@ import {
   useTriggerChatTransport,
 } from "@trigger.dev/sdk/chat/react"
 import type { UIMessage } from "ai"
-import { ArrowRightLeftIcon, MessageSquareIcon, MonitorIcon } from "lucide-react"
+import {
+  ArrowRightLeftIcon,
+  MessageSquareIcon,
+  MonitorIcon,
+} from "lucide-react"
 
 import {
   loadTranscript,
@@ -76,9 +80,7 @@ export function ChatView({
   isGroup = false,
   bots = [],
 }: ChatViewProps) {
-  const [selectedBotId, setSelectedBotId] = useState<string>(
-    bots[0]?.id ?? ""
-  )
+  const [selectedBotId, setSelectedBotId] = useState<string>(bots[0]?.id ?? "")
 
   const transport = useTriggerChatTransport<typeof chatAgent>({
     task: "chat-agent",
@@ -89,8 +91,15 @@ export function ChatView({
   })
 
   React.useEffect(() => {
-    if (selectedBotId && typeof (transport as unknown as { setClientData?: (data: unknown) => void }).setClientData === "function") {
-      ;(transport as unknown as { setClientData: (data: unknown) => void }).setClientData({
+    if (
+      selectedBotId &&
+      typeof (
+        transport as unknown as { setClientData?: (data: unknown) => void }
+      ).setClientData === "function"
+    ) {
+      ;(
+        transport as unknown as { setClientData: (data: unknown) => void }
+      ).setClientData({
         selectedBotId,
       })
     }
@@ -218,8 +227,7 @@ function HandoffPart({
   bots: ChatBotItem[]
 }) {
   const input = part.input as
-    | { targetBotName?: string; reason?: string }
-    | undefined
+    { targetBotName?: string; reason?: string } | undefined
   const output = part.output as
     | {
         success?: boolean
@@ -258,7 +266,9 @@ function HandoffPart({
                   {targetBot?.job || output?.targetBotJob}
                 </Badge>
               )}
-              {isLoading && <Spinner className="size-3 text-muted-foreground" />}
+              {isLoading && (
+                <Spinner className="size-3 text-muted-foreground" />
+              )}
             </div>
             {targetBot && (
               <ChatAvatar
@@ -274,7 +284,9 @@ function HandoffPart({
             </p>
           )}
           {output?.error && (
-            <p className="text-xs font-medium text-destructive">{output.error}</p>
+            <p className="text-xs font-medium text-destructive">
+              {output.error}
+            </p>
           )}
         </div>
       </div>
@@ -371,6 +383,40 @@ function ToolCallPart({ part }: { part: GenericToolPart }) {
   )
 }
 
+function getUserMessageTargetBot(
+  message: UIMessage,
+  messageIndex: number,
+  allMessages: UIMessage[],
+  bots: ChatBotItem[]
+): ChatBotItem | undefined {
+  const meta = (message as { metadata?: { selectedBotId?: string } }).metadata
+  if (meta?.selectedBotId) {
+    const found = bots.find((b) => b.id === meta.selectedBotId)
+    if (found) return found
+  }
+
+  // Check next assistant message metadata
+  if (messageIndex + 1 < allMessages.length) {
+    const nextMsg = allMessages[messageIndex + 1] as {
+      metadata?: {
+        botId?: string
+        selectedBotId?: string
+        handedOffFromBotId?: string
+      }
+    }
+    const nextBotId =
+      nextMsg.metadata?.handedOffFromBotId ||
+      nextMsg.metadata?.selectedBotId ||
+      nextMsg.metadata?.botId
+    if (nextBotId) {
+      const found = bots.find((b) => b.id === nextBotId)
+      if (found) return found
+    }
+  }
+
+  return bots[0]
+}
+
 function ChatContent({
   chatId,
   name,
@@ -390,8 +436,7 @@ function ChatContent({
     resume: initialMessages.length > 0,
   })
 
-  const selectedBot =
-    bots.find((b) => b.id === selectedBotId) ?? bots[0]
+  const selectedBot = bots.find((b) => b.id === selectedBotId) ?? bots[0]
 
   const handleSubmit = (message: PromptInputMessage) => {
     const text = message.text?.trim()
@@ -399,9 +444,7 @@ function ChatContent({
 
     sendMessage(
       { text },
-      isGroup && selectedBotId
-        ? { metadata: { selectedBotId } }
-        : undefined
+      isGroup && selectedBotId ? { metadata: { selectedBotId } } : undefined
     )
     setInput("")
   }
@@ -423,8 +466,7 @@ function ChatContent({
       }
 
       const isToolPart =
-        part.type === "dynamic-tool" ||
-        part.type.startsWith("tool-")
+        part.type === "dynamic-tool" || part.type.startsWith("tool-")
 
       if (isToolPart) {
         const genericPart = part as unknown as GenericToolPart
@@ -434,18 +476,12 @@ function ChatContent({
             : genericPart.type.replace(/^tool-/, "")
 
         // viewScreen: agent internal screen inspection - never rendered in chat
-        if (
-          toolName === "viewScreen" ||
-          toolName === "view_screen"
-        ) {
+        if (toolName === "viewScreen" || toolName === "view_screen") {
           return null
         }
 
         // showScreen: user-facing screen capture - rendered in chat
-        if (
-          toolName === "showScreen" ||
-          toolName === "show_screen"
-        ) {
+        if (toolName === "showScreen" || toolName === "show_screen") {
           return (
             <ScreenViewPart
               key={`${messageId}-${keySuffix}-${partIndex}`}
@@ -479,8 +515,8 @@ function ChatContent({
   }
 
   return (
-    <div className="flex h-full w-full flex-1 flex-col min-h-0 min-w-0 overflow-hidden">
-      <Conversation className="flex-1 min-h-0 min-w-0 w-full overflow-hidden">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
+      <Conversation className="min-h-0 w-full min-w-0 flex-1 overflow-hidden">
         <ConversationContent className="mx-auto flex w-full max-w-3xl flex-col gap-6 p-4">
           {messages.length === 0 ? (
             <ConversationEmptyState
@@ -551,11 +587,9 @@ function ChatContent({
                     handoffIndex
                   ] as GenericToolPart
                   const input = handoffPart.input as
-                    | { targetBotName?: string }
-                    | undefined
+                    { targetBotName?: string } | undefined
                   const output = handoffPart.output as
-                    | { targetBotId?: string; targetBotName?: string }
-                    | undefined
+                    { targetBotId?: string; targetBotName?: string } | undefined
                   const targetName =
                     output?.targetBotName || input?.targetBotName
                   const targetId = output?.targetBotId
@@ -586,7 +620,7 @@ function ChatContent({
                             alt={firstBot?.name}
                           />
                           <div className="flex min-w-0 flex-1 flex-col gap-1">
-                            <span className="text-xs font-semibold leading-none text-foreground/80">
+                            <span className="text-xs leading-none font-semibold text-foreground/80">
                               {firstBot?.name}
                             </span>
                             <MessageContent>
@@ -615,7 +649,7 @@ function ChatContent({
                               alt={secondBot?.name}
                             />
                             <div className="flex min-w-0 flex-1 flex-col gap-1">
-                              <span className="text-xs font-semibold leading-none text-foreground/80">
+                              <span className="text-xs leading-none font-semibold text-foreground/80">
                                 {secondBot?.name}
                               </span>
                               <MessageContent>
@@ -647,7 +681,7 @@ function ChatContent({
                                 alt={secondBot?.name}
                               />
                               <div className="flex min-w-0 flex-1 flex-col gap-1">
-                                <span className="text-xs font-semibold leading-none text-foreground/80">
+                                <span className="text-xs leading-none font-semibold text-foreground/80">
                                   {secondBot?.name}
                                 </span>
                                 <MessageContent>
@@ -701,7 +735,7 @@ function ChatContent({
                         alt={messageBot.name}
                       />
                       <div className="flex min-w-0 flex-1 flex-col gap-1">
-                        <span className="text-xs font-semibold leading-none text-foreground/80">
+                        <span className="text-xs leading-none font-semibold text-foreground/80">
                           {messageBot.name}
                         </span>
                         <MessageContent>
@@ -713,6 +747,63 @@ function ChatContent({
                         </MessageContent>
                       </div>
                     </div>
+                  </Message>
+                )
+              }
+
+              if (message.role === "user") {
+                const userTargetBot = isGroup
+                  ? getUserMessageTargetBot(
+                      message,
+                      messageIndex,
+                      messages,
+                      bots
+                    )
+                  : undefined
+
+                const textParts = message.parts.filter(
+                  (p) => p.type === "text"
+                ) as Array<{ type: "text"; text: string }>
+                const otherParts = message.parts.filter(
+                  (p) => p.type !== "text"
+                )
+
+                return (
+                  <Message
+                    from={message.role}
+                    key={`${message.id}-${messageIndex}`}
+                  >
+                    <MessageContent>
+                      {textParts.map((part, partIndex) => (
+                        <div
+                          key={`${message.id}-${messageIndex}-${partIndex}`}
+                          className="text-sm leading-relaxed wrap-break-word whitespace-pre-wrap"
+                        >
+                          {partIndex === 0 && userTargetBot && (
+                            <Badge
+                              variant="outline"
+                              className="mr-1.5 inline-flex h-5 max-w-40 -translate-y-px items-center gap-1 rounded-full border-border/50 bg-background/80 py-0 pr-2 pl-1 align-middle text-[11px] font-medium text-foreground shadow-2xs backdrop-blur-xs select-none"
+                            >
+                              <ChatAvatar
+                                seed={userTargetBot.avatar || userTargetBot.id}
+                                className="size-3.5 shrink-0 rounded-full ring-1 ring-border/50"
+                                alt={userTargetBot.name}
+                              />
+                              <span className="max-w-28 truncate">
+                                @{userTargetBot.name}
+                              </span>
+                            </Badge>
+                          )}
+                          <span>{part.text}</span>
+                        </div>
+                      ))}
+                      {otherParts.length > 0 &&
+                        renderMessageParts(
+                          otherParts,
+                          message.id,
+                          messageIndex
+                        )}
+                    </MessageContent>
                   </Message>
                 )
               }
@@ -744,7 +835,7 @@ function ChatContent({
                     alt={selectedBot.name}
                   />
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <span className="text-xs font-semibold leading-none text-foreground/80">
+                    <span className="text-xs leading-none font-semibold text-foreground/80">
                       {selectedBot.name}
                     </span>
                     <MessageContent>
