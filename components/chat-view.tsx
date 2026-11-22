@@ -8,7 +8,7 @@ import {
   useTriggerChatTransport,
 } from "@trigger.dev/sdk/chat/react"
 import type { UIMessage } from "ai"
-import { MessageSquareIcon, MonitorIcon } from "lucide-react"
+import { ArrowRightLeftIcon, MessageSquareIcon, MonitorIcon } from "lucide-react"
 
 import {
   loadTranscript,
@@ -56,6 +56,8 @@ import type { chatAgent } from "@/trigger/chat"
 export interface ChatBotItem {
   id: string
   name: string
+  job?: string | null
+  instructions?: string | null
   avatar?: string | null
 }
 
@@ -77,8 +79,6 @@ export function ChatView({
   const [selectedBotId, setSelectedBotId] = useState<string>(
     bots[0]?.id ?? ""
   )
-  const selectedBotIdRef = React.useRef(selectedBotId)
-  selectedBotIdRef.current = selectedBotId
 
   const transport = useTriggerChatTransport<typeof chatAgent>({
     task: "chat-agent",
@@ -201,9 +201,85 @@ function getToolTitle(
         : "Keyboard Press"
     case "showScreen":
       return "Screen Capture"
+    case "handoff":
+      return typeof input?.targetBotName === "string"
+        ? `Handoff to ${input.targetBotName}`
+        : "Handoff to Teammate"
     default:
       return toolName
   }
+}
+
+function HandoffPart({
+  part,
+  bots,
+}: {
+  part: GenericToolPart
+  bots: ChatBotItem[]
+}) {
+  const input = part.input as
+    | { targetBotName?: string; reason?: string }
+    | undefined
+  const output = part.output as
+    | {
+        success?: boolean
+        targetBotName?: string
+        targetBotJob?: string
+        reason?: string
+        error?: string
+      }
+    | undefined
+  const targetBotName =
+    output?.targetBotName || input?.targetBotName || "Teammate"
+  const targetBot = bots.find(
+    (b) => b.name.toLowerCase() === targetBotName.toLowerCase()
+  )
+  const reason = output?.reason || input?.reason
+  const isLoading =
+    part.state === "input-available" || part.state === "input-streaming"
+
+  return (
+    <div className="w-full rounded-2xl border border-border/40 bg-card/60 p-4 shadow-xs">
+      <div className="flex items-start gap-3.5">
+        <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted/60 text-muted-foreground">
+          <ArrowRightLeftIcon className="size-3.5" />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-foreground">
+                Handoff to {targetBotName}
+              </span>
+              {(targetBot?.job || output?.targetBotJob) && (
+                <Badge
+                  variant="secondary"
+                  className="rounded-full px-2 py-0 text-[11px] font-normal text-muted-foreground"
+                >
+                  {targetBot?.job || output?.targetBotJob}
+                </Badge>
+              )}
+              {isLoading && <Spinner className="size-3 text-muted-foreground" />}
+            </div>
+            {targetBot && (
+              <ChatAvatar
+                seed={targetBot.avatar || targetBot.id}
+                className="size-6 shrink-0 rounded-full ring-1 ring-border/50"
+                alt={targetBot.name}
+              />
+            )}
+          </div>
+          {reason && (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {reason}
+            </p>
+          )}
+          {output?.error && (
+            <p className="text-xs font-medium text-destructive">{output.error}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function ScreenViewPart({ part }: { part: GenericToolPart }) {
@@ -332,6 +408,76 @@ function ChatContent({
 
   const isGenerating = status === "submitted" || status === "streaming"
 
+  const renderMessageParts = (
+    parts: UIMessage["parts"],
+    messageId: string,
+    keySuffix: string | number
+  ) => {
+    return parts.map((part, partIndex) => {
+      if (part.type === "text") {
+        return (
+          <MessageResponse key={`${messageId}-${keySuffix}-${partIndex}`}>
+            {part.text}
+          </MessageResponse>
+        )
+      }
+
+      const isToolPart =
+        part.type === "dynamic-tool" ||
+        part.type.startsWith("tool-")
+
+      if (isToolPart) {
+        const genericPart = part as unknown as GenericToolPart
+        const toolName =
+          genericPart.type === "dynamic-tool"
+            ? (genericPart.toolName ?? "")
+            : genericPart.type.replace(/^tool-/, "")
+
+        // viewScreen: agent internal screen inspection - never rendered in chat
+        if (
+          toolName === "viewScreen" ||
+          toolName === "view_screen"
+        ) {
+          return null
+        }
+
+        // showScreen: user-facing screen capture - rendered in chat
+        if (
+          toolName === "showScreen" ||
+          toolName === "show_screen"
+        ) {
+          return (
+            <ScreenViewPart
+              key={`${messageId}-${keySuffix}-${partIndex}`}
+              part={genericPart}
+            />
+          )
+        }
+
+        // handoff: bot-to-bot handoff in group chat
+        if (toolName === "handoff") {
+          return (
+            <HandoffPart
+              key={`${messageId}-${keySuffix}-${partIndex}`}
+              part={genericPart}
+              bots={bots}
+            />
+          )
+        }
+
+        // Generic tool call rendering
+        return (
+          <ToolCallPart
+            key={`${messageId}-${keySuffix}-${partIndex}`}
+            part={genericPart}
+          />
+        )
+      }
+
+      return null
+    })
+  }
+
   return (
     <div className="flex h-full w-full flex-1 flex-col min-h-0 min-w-0 overflow-hidden">
       <Conversation className="flex-1 min-h-0 min-w-0 w-full overflow-hidden">
@@ -351,76 +497,272 @@ function ChatContent({
               description="Type a message below to begin chatting."
             />
           ) : (
-            messages.map((message, messageIndex) => (
-              <Message from={message.role} key={`${message.id}-${messageIndex}`}>
-                <MessageContent>
-                  {message.parts.map((part, partIndex) => {
-                    if (part.type === "text") {
-                      return (
-                        <MessageResponse
-                          key={`${message.id}-${messageIndex}-${partIndex}`}
-                        >
-                          {part.text}
-                        </MessageResponse>
-                      )
+            messages.map((message, messageIndex) => {
+              if (isGroup && message.role === "assistant") {
+                const meta = (
+                  message as {
+                    metadata?: {
+                      botId?: string
+                      selectedBotId?: string
+                      handedOffFromBotId?: string
+                      handedOffFromBotName?: string
                     }
+                  }
+                ).metadata
 
-                    const isToolPart =
-                      part.type === "dynamic-tool" ||
-                      part.type.startsWith("tool-")
+                const handoffIndex = message.parts.findIndex(
+                  (p) =>
+                    (p.type === "dynamic-tool" &&
+                      (p as unknown as GenericToolPart).toolName ===
+                        "handoff") ||
+                    p.type === "tool-handoff"
+                )
 
-                    if (isToolPart) {
-                      const genericPart = part as unknown as GenericToolPart
-                      const toolName =
-                        genericPart.type === "dynamic-tool"
-                          ? (genericPart.toolName ?? "")
-                          : genericPart.type.replace(/^tool-/, "")
-
-                      // viewScreen: agent internal screen inspection - never rendered in chat
-                      if (
-                        toolName === "viewScreen" ||
-                        toolName === "view_screen"
-                      ) {
-                        return null
+                if (handoffIndex !== -1) {
+                  // Handoff occurred: display first bot's message, then second bot's message
+                  let firstBot: ChatBotItem | undefined
+                  if (meta?.handedOffFromBotId) {
+                    firstBot = bots.find(
+                      (b) => b.id === meta.handedOffFromBotId
+                    )
+                  }
+                  if (!firstBot) {
+                    for (let i = messageIndex - 1; i >= 0; i--) {
+                      if (messages[i].role === "user") {
+                        const userMeta = (
+                          messages[i] as {
+                            metadata?: { selectedBotId?: string }
+                          }
+                        ).metadata
+                        if (userMeta?.selectedBotId) {
+                          firstBot = bots.find(
+                            (b) => b.id === userMeta.selectedBotId
+                          )
+                          break
+                        }
                       }
+                    }
+                  }
+                  if (!firstBot) {
+                    firstBot = bots[0]
+                  }
 
-                      // showScreen: user-facing screen capture - rendered in chat
-                      if (
-                        toolName === "showScreen" ||
-                        toolName === "show_screen"
-                      ) {
-                        return (
-                          <ScreenViewPart
-                            key={`${message.id}-${messageIndex}-${partIndex}`}
-                            part={genericPart}
+                  const handoffPart = message.parts[
+                    handoffIndex
+                  ] as GenericToolPart
+                  const input = handoffPart.input as
+                    | { targetBotName?: string }
+                    | undefined
+                  const output = handoffPart.output as
+                    | { targetBotId?: string; targetBotName?: string }
+                    | undefined
+                  const targetName =
+                    output?.targetBotName || input?.targetBotName
+                  const targetId = output?.targetBotId
+                  let secondBot = bots.find(
+                    (b) =>
+                      (targetId && b.id === targetId) ||
+                      (targetName &&
+                        b.name.toLowerCase() === targetName.toLowerCase())
+                  )
+                  if (!secondBot && meta?.botId) {
+                    secondBot = bots.find((b) => b.id === meta.botId)
+                  }
+                  if (!secondBot) {
+                    secondBot = bots.find((b) => b.id !== firstBot?.id)
+                  }
+
+                  const firstBotParts = message.parts.slice(0, handoffIndex + 1)
+                  const secondBotParts = message.parts.slice(handoffIndex + 1)
+
+                  return (
+                    <React.Fragment key={`${message.id}-${messageIndex}`}>
+                      {/* First bot: Handoff message in message box */}
+                      <Message from="assistant">
+                        <div className="flex w-full items-start gap-3">
+                          <ChatAvatar
+                            seed={firstBot?.avatar || firstBot?.id || "bot"}
+                            className="mt-0.5 size-7 shrink-0 rounded-full ring-1 ring-border/50"
+                            alt={firstBot?.name}
                           />
+                          <div className="flex min-w-0 flex-1 flex-col gap-1">
+                            <span className="text-xs font-semibold leading-none text-foreground/80">
+                              {firstBot?.name}
+                            </span>
+                            <MessageContent>
+                              {renderMessageParts(
+                                firstBotParts,
+                                message.id,
+                                "first"
+                              )}
+                            </MessageContent>
+                          </div>
+                        </div>
+                      </Message>
+
+                      {/* Second bot: Reply to user's prompt as a new message */}
+                      {secondBotParts.length > 0 && (
+                        <Message from="assistant">
+                          <div className="flex w-full items-start gap-3">
+                            <ChatAvatar
+                              seed={
+                                secondBot?.avatar ||
+                                secondBot?.id ||
+                                firstBot?.avatar ||
+                                "bot"
+                              }
+                              className="mt-0.5 size-7 shrink-0 rounded-full ring-1 ring-border/50"
+                              alt={secondBot?.name}
+                            />
+                            <div className="flex min-w-0 flex-1 flex-col gap-1">
+                              <span className="text-xs font-semibold leading-none text-foreground/80">
+                                {secondBot?.name}
+                              </span>
+                              <MessageContent>
+                                {renderMessageParts(
+                                  secondBotParts,
+                                  message.id,
+                                  "second"
+                                )}
+                              </MessageContent>
+                            </div>
+                          </div>
+                        </Message>
+                      )}
+
+                      {/* Second bot: Thinking state if currently generating */}
+                      {secondBotParts.length === 0 &&
+                        isGenerating &&
+                        messageIndex === messages.length - 1 && (
+                          <Message from="assistant">
+                            <div className="flex w-full items-start gap-3">
+                              <ChatAvatar
+                                seed={
+                                  secondBot?.avatar ||
+                                  secondBot?.id ||
+                                  firstBot?.avatar ||
+                                  "bot"
+                                }
+                                className="mt-0.5 size-7 shrink-0 rounded-full ring-1 ring-border/50"
+                                alt={secondBot?.name}
+                              />
+                              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                                <span className="text-xs font-semibold leading-none text-foreground/80">
+                                  {secondBot?.name}
+                                </span>
+                                <MessageContent>
+                                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <Spinner className="size-4" />
+                                    <span>Thinking...</span>
+                                  </div>
+                                </MessageContent>
+                              </div>
+                            </div>
+                          </Message>
+                        )}
+                    </React.Fragment>
+                  )
+                }
+
+                // Standard assistant message in group chat (no handoff)
+                let messageBot = bots.find(
+                  (b) => b.id === (meta?.botId || meta?.selectedBotId)
+                )
+                if (!messageBot) {
+                  for (let i = messageIndex - 1; i >= 0; i--) {
+                    if (messages[i].role === "user") {
+                      const userMeta = (
+                        messages[i] as {
+                          metadata?: { selectedBotId?: string }
+                        }
+                      ).metadata
+                      if (userMeta?.selectedBotId) {
+                        messageBot = bots.find(
+                          (b) => b.id === userMeta.selectedBotId
                         )
+                        break
                       }
-
-                      // Generic tool call rendering
-                      return (
-                        <ToolCallPart
-                          key={`${message.id}-${messageIndex}-${partIndex}`}
-                          part={genericPart}
-                        />
-                      )
                     }
+                  }
+                }
+                if (!messageBot) {
+                  messageBot = bots[0]
+                }
 
-                    return null
-                  })}
-                </MessageContent>
-              </Message>
-            ))
+                return (
+                  <Message
+                    from={message.role}
+                    key={`${message.id}-${messageIndex}`}
+                  >
+                    <div className="flex w-full items-start gap-3">
+                      <ChatAvatar
+                        seed={messageBot.avatar || messageBot.id}
+                        className="mt-0.5 size-7 shrink-0 rounded-full ring-1 ring-border/50"
+                        alt={messageBot.name}
+                      />
+                      <div className="flex min-w-0 flex-1 flex-col gap-1">
+                        <span className="text-xs font-semibold leading-none text-foreground/80">
+                          {messageBot.name}
+                        </span>
+                        <MessageContent>
+                          {renderMessageParts(
+                            message.parts,
+                            message.id,
+                            messageIndex
+                          )}
+                        </MessageContent>
+                      </div>
+                    </div>
+                  </Message>
+                )
+              }
+
+              return (
+                <Message
+                  from={message.role}
+                  key={`${message.id}-${messageIndex}`}
+                >
+                  <MessageContent>
+                    {renderMessageParts(
+                      message.parts,
+                      message.id,
+                      messageIndex
+                    )}
+                  </MessageContent>
+                </Message>
+              )
+            })
           )}
 
           {status === "submitted" && (
             <Message from="assistant">
-              <MessageContent>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Spinner className="size-4" />
-                  <span>Thinking...</span>
+              {isGroup && selectedBot ? (
+                <div className="flex w-full items-start gap-3">
+                  <ChatAvatar
+                    seed={selectedBot.avatar || selectedBot.id}
+                    className="mt-0.5 size-7 shrink-0 rounded-full ring-1 ring-border/50"
+                    alt={selectedBot.name}
+                  />
+                  <div className="flex min-w-0 flex-1 flex-col gap-1">
+                    <span className="text-xs font-semibold leading-none text-foreground/80">
+                      {selectedBot.name}
+                    </span>
+                    <MessageContent>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Spinner className="size-4" />
+                        <span>Thinking...</span>
+                      </div>
+                    </MessageContent>
+                  </div>
                 </div>
-              </MessageContent>
+              ) : (
+                <MessageContent>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Spinner className="size-4" />
+                    <span>Thinking...</span>
+                  </div>
+                </MessageContent>
+              )}
             </Message>
           )}
 

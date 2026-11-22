@@ -409,6 +409,71 @@ export const createShowScreenTool = (sandbox?: Sandbox | null) =>
     },
   })
 
+export function createHandoffTool(
+  availableBots: Array<{
+    id: string
+    name: string
+    job: string
+    instructions?: string | null
+    avatar?: string | null
+  }>,
+  onHandoff?: (targetBot: {
+    id: string
+    name: string
+    job: string
+    instructions?: string | null
+    avatar?: string | null
+  }) => void
+) {
+  return tool({
+    description:
+      "Hand off the conversation to another teammate bot in this group chat who is better suited to answer the user's prompt based on their domain, specialty, and role. Once called, the target teammate will take over and answer the prompt.",
+    inputSchema: z.object({
+      targetBotName: z
+        .string()
+        .describe(
+          "The exact name of the teammate bot in this group chat to hand off the conversation to"
+        ),
+      reason: z
+        .string()
+        .describe(
+          "The clear reason explaining why this teammate is better suited to handle the user's prompt"
+        ),
+    }),
+    execute: async ({ targetBotName, reason }) => {
+      const normalizedTarget = targetBotName.trim().toLowerCase()
+      const targetBot = availableBots.find(
+        (b) =>
+          b.name.trim().toLowerCase() === normalizedTarget ||
+          b.id === targetBotName.trim()
+      )
+
+      if (!targetBot) {
+        const botList = availableBots
+          .map((b) => `"${b.name}" (${b.job})`)
+          .join(", ")
+        return {
+          success: false,
+          error: `Teammate "${targetBotName}" was not found in this group chat. Available teammates are: ${botList}.`,
+        }
+      }
+
+      if (onHandoff) {
+        onHandoff(targetBot)
+      }
+
+      return {
+        success: true,
+        targetBotId: targetBot.id,
+        targetBotName: targetBot.name,
+        targetBotJob: targetBot.job,
+        reason,
+        directive: `Handoff successful! You have handed off the conversation to ${targetBot.name} (${targetBot.job}). In the immediate next step, respond directly to the user's prompt as ${targetBot.name}. Adopt ${targetBot.name}'s persona, instructions, and domain expertise (${targetBot.instructions || targetBot.job}). Provide the complete, high-quality answer to the user. Do not call handoff again.`,
+      }
+    },
+  })
+}
+
 export function createComputerUseTools(sandbox?: Sandbox | null) {
   return {
     bash: createBashTool(sandbox),
