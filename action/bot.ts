@@ -33,6 +33,16 @@ export async function createBot(data: CreateBotInput) {
   const daytona = getDaytonaClient()
   const sandbox = await daytona.create()
 
+  // Ensure sandbox is started and initialize blank MEMORY.md file on creation via bash touch
+  try {
+    if (sandbox.state !== "started") {
+      await sandbox.start()
+    }
+    await sandbox.process.executeCommand("touch MEMORY.md")
+  } catch (error) {
+    console.error("Failed to create blank MEMORY.md in sandbox:", error)
+  }
+
   const botId = nanoid()
   const chatId = nanoid()
 

@@ -44,15 +44,33 @@ export function getToolTitle(
   input?: Record<string, unknown>
 ): string {
   switch (toolName) {
+    case "recallMemory":
+      return "Recall Memory"
+    case "updateMemory":
+      return "Update Memory"
     case "bash":
       return typeof input?.command === "string"
         ? `$ ${input.command}`
         : "Run Command"
     case "readFile":
+      if (
+        input?.path === "MEMORY.md" ||
+        (typeof input?.path === "string" &&
+          input.path.toLowerCase().includes("memory.md"))
+      ) {
+        return "Recall Memory"
+      }
       return typeof input?.path === "string"
         ? `Read ${input.path}`
         : "Read File"
     case "writeFile":
+      if (
+        input?.path === "MEMORY.md" ||
+        (typeof input?.path === "string" &&
+          input.path.toLowerCase().includes("memory.md"))
+      ) {
+        return "Update Memory"
+      }
       return typeof input?.path === "string"
         ? `Write ${input.path}`
         : "Write File"
@@ -95,8 +113,7 @@ export function HandoffPart({
   bots: ChatBotItem[]
 }) {
   const input = part.input as
-    | { targetBotName?: string; reason?: string }
-    | undefined
+    { targetBotName?: string; reason?: string } | undefined
   const output = part.output as
     | {
         success?: boolean
@@ -111,7 +128,12 @@ export function HandoffPart({
   const targetBot = bots.find(
     (b) => b.name.toLowerCase() === targetBotName.toLowerCase()
   )
-  const reason = output?.reason || input?.reason
+  const rawReason = output?.reason || input?.reason
+  const reason = rawReason
+    ? rawReason
+        .replace(/MEMORY\.md/gi, "memory")
+        .replace(/\b1:1\s+(chat|conversation)s?\b/gi, "past conversations")
+    : undefined
   const isLoading =
     part.state === "input-available" || part.state === "input-streaming"
 
@@ -220,6 +242,32 @@ export function ScreenViewPart({ part }: { part: GenericToolPart }) {
   return null
 }
 
+function sanitizeToolData(data: unknown): unknown {
+  if (typeof data === "string") {
+    return data
+      .replace(/MEMORY\.md/gi, "memory")
+      .replace(/\b1:1\s+(chat|conversation)s?\b/gi, "past conversations")
+  }
+  if (Array.isArray(data)) {
+    return data.map(sanitizeToolData)
+  }
+  if (data !== null && typeof data === "object") {
+    const result: Record<string, unknown> = {}
+    for (const [key, val] of Object.entries(data)) {
+      if (
+        key === "path" &&
+        typeof val === "string" &&
+        val.toLowerCase().includes("memory.md")
+      ) {
+        continue
+      }
+      result[key] = sanitizeToolData(val)
+    }
+    return result
+  }
+  return data
+}
+
 export function ToolCallPart({ part }: { part: GenericToolPart }) {
   const toolName =
     part.type === "dynamic-tool"
@@ -227,13 +275,12 @@ export function ToolCallPart({ part }: { part: GenericToolPart }) {
       : part.type.replace(/^tool-/, "")
   const title = getToolTitle(toolName, part.input)
 
+  const sanitizedInput = sanitizeToolData(part.input) as
+    Record<string, unknown> | undefined
+  const sanitizedOutput = sanitizeToolData(part.output)
+
   return (
-    <Tool
-      defaultOpen={
-        part.state === "input-available" || part.state === "output-error"
-      }
-      className="my-2 bg-card"
-    >
+    <Tool defaultOpen={false} className="my-2 w-full bg-card">
       <ToolHeader
         type={part.type as "dynamic-tool"}
         state={part.state}
@@ -241,11 +288,11 @@ export function ToolCallPart({ part }: { part: GenericToolPart }) {
         title={title}
       />
       <ToolContent>
-        {part.input && Object.keys(part.input).length > 0 && (
-          <ToolInput input={part.input} />
+        {sanitizedInput && Object.keys(sanitizedInput).length > 0 && (
+          <ToolInput input={sanitizedInput} />
         )}
-        {(Boolean(part.output) || Boolean(part.errorText)) && (
-          <ToolOutput output={part.output} errorText={part.errorText} />
+        {(Boolean(sanitizedOutput) || Boolean(part.errorText)) && (
+          <ToolOutput output={sanitizedOutput} errorText={part.errorText} />
         )}
       </ToolContent>
     </Tool>

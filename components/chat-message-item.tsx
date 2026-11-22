@@ -216,7 +216,7 @@ export function ChatMessageItem({
                 <span className="text-xs leading-none font-semibold text-foreground/80">
                   {firstBot?.name}
                 </span>
-                <MessageContent>
+                <MessageContent className="w-full">
                   {renderMessageParts(
                     firstBotParts,
                     message.id,
@@ -246,7 +246,7 @@ export function ChatMessageItem({
                   <span className="text-xs leading-none font-semibold text-foreground/80">
                     {secondBot?.name}
                   </span>
-                  <MessageContent>
+                  <MessageContent className="w-full">
                     {renderMessageParts(
                       secondBotParts,
                       message.id,
@@ -279,7 +279,7 @@ export function ChatMessageItem({
                     <span className="text-xs leading-none font-semibold text-foreground/80">
                       {secondBot?.name}
                     </span>
-                    <MessageContent>
+                    <MessageContent className="w-full">
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <Spinner className="size-4" />
                         <span>Thinking...</span>
@@ -328,7 +328,7 @@ export function ChatMessageItem({
             <span className="text-xs leading-none font-semibold text-foreground/80">
               {messageBot?.name}
             </span>
-            <MessageContent>
+            <MessageContent className="w-full">
               {renderMessageParts(
                 message.parts,
                 message.id,
@@ -392,7 +392,7 @@ export function ChatMessageItem({
 
   return (
     <Message from={message.role} key={`${message.id}-${messageIndex}`}>
-      <MessageContent>
+      <MessageContent className={message.role === "assistant" ? "w-full" : undefined}>
         {renderMessageParts(message.parts, message.id, messageIndex, bots)}
       </MessageContent>
     </Message>
