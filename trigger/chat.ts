@@ -65,7 +65,18 @@ function buildSystemPrompt(
       `Group Chat Environment:
 You are participating in a collaborative group chat named "${groupContext.groupName || "Team"}".
 In this group chat, you work alongside human user(s) and fellow AI teammates.
-You are currently the active responder representing: ${name} (${job}).`,
+You are currently the active responder representing: ${name} (${job}).
+The user has directed the current message to you (@${name}).`,
+      `CRITICAL IDENTITY & PERSONA RULES:
+- You are currently responding STRICTLY as ${name} (${job}).
+- You are NOT any other teammate. In particular:
+${otherTeammates.map((t) => `  - You are NOT ${t.name} (${t.job}).`).join("\n")}
+- The conversation history contains messages from other AI teammates in this group chat. DO NOT adopt their names, personas, greetings, or roles!
+- NEVER say "I am [other teammate name]" or "[other teammate name] here!".
+- NEVER introduce yourself as any teammate other than ${name}.
+- When asked "Who are you?", "What is your role?", or introducing yourself, always state clearly that you are ${name} (${job}) and describe your own expertise (${customInstructions}).
+- Speak only in your own voice and identity as ${name}.
+- Only switch persona if you execute a "handoff" tool call to another teammate in this exact turn.`,
       `Your Specific Instructions & Expertise:
 ${customInstructions}`,
       `Your Teammates in this Group Chat:
@@ -84,6 +95,12 @@ ${teammatesList}`,
       `Long-Term Memory & Natural Recall:
 You have a persistent long-term memory system across all conversations.
 CRITICAL GOAL: You must remember things said by the user across conversations, including in group chats.
+- MANDATORY Tool Calling Rule (Save Immediately):
+  - Whenever the user shares ANY personal preference (e.g. favorite movie, food, drinks, anime, hobbies), personal background, project details, architecture decisions, or specific instructions:
+    YOU MUST ACTUALLY CALL "updateMemory" in this exact turn to save it.
+    DO NOT simply say in text "I have noted that down" or "I will remember that" without executing the tool call! A text promise does not save anything to memory.
+  - To save without losing existing memories:
+    First call "recallMemory" to inspect existing notes, combine them with the new information, and call "updateMemory" to save it immediately.
 - When to Recall Memory:
   - Whenever the user or a teammate asks you about user preferences, favorite things (movies, food, music, hobbies), past decisions, or asks "do you know/remember...", "what is my favorite...":
     1. Immediately call the "recallMemory" tool BEFORE answering.
@@ -92,8 +109,6 @@ CRITICAL GOAL: You must remember things said by the user across conversations, i
        - DO NOT HAND OFF TO ANOTHER TEAMMATE.
        - You MUST answer the user directly yourself.
        - Respond politely and naturally (e.g. "I don't think you've told me your favorite movie yet! What's your favorite?", "My memory is drawing a blank on that—remind me?").
-- When to Update Memory:
-  - Whenever the user shares any preference, fact, or instruction, call "updateMemory" to save it so you will always remember it.
 - ABSOLUTE PROHIBITIONS (NEVER LEAK SYSTEM INTERNALS):
   - NEVER output the word "MEMORY.md" under any circumstances.
   - NEVER mention files, file paths, extensions, sandboxes, filesystems, tools, databases, or technical storage to the user.
@@ -229,8 +244,26 @@ export const chatAgent = chat.agent({
   },
   run: async ({ messages, signal, streamText, chatId, clientData }) => {
     let bot = null
-    const metadata = clientData as { selectedBotId?: string } | undefined
-    const selectedBotId = metadata?.selectedBotId
+    let selectedBotId: string | undefined
+
+    // 1. Priority: Latest user message's metadata.selectedBotId
+    if (messages && messages.length > 0) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const m = messages[i] as any
+        if (m.role === "user" && m.metadata?.selectedBotId) {
+          selectedBotId = m.metadata.selectedBotId
+          break
+        }
+      }
+    }
+
+    // 2. Fallback to transport clientData
+    if (!selectedBotId) {
+      const metadata = clientData as { selectedBotId?: string } | undefined
+      selectedBotId = metadata?.selectedBotId
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let chatRecord: any = null
 
@@ -344,10 +377,47 @@ export const chatAgent = chat.agent({
       })
     }
 
+    const modelMessages = [...messages]
+    if (isGroup && bot && modelMessages.length > 0) {
+      const lastIdx = modelMessages.length - 1
+      const lastMsg = modelMessages[lastIdx]
+      if (lastMsg && lastMsg.role === "user") {
+        if (typeof lastMsg.content === "string") {
+          if (!lastMsg.content.includes(`@${bot.name}`)) {
+            modelMessages[lastIdx] = {
+              ...lastMsg,
+              content: `[@${bot.name}] ${lastMsg.content}`,
+            }
+          }
+        } else if (Array.isArray(lastMsg.content)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const firstTextPart = (lastMsg.content as any[]).find(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (p: any) => p.type === "text"
+          ) as { type: "text"; text: string } | undefined
+          if (
+            firstTextPart &&
+            typeof firstTextPart.text === "string" &&
+            !firstTextPart.text.includes(`@${bot.name}`)
+          ) {
+            modelMessages[lastIdx] = {
+              ...lastMsg,
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              content: (lastMsg.content as any[]).map((p: any) =>
+                p === firstTextPart
+                  ? { ...p, text: `[@${bot.name}] ${firstTextPart.text}` }
+                  : p
+              ),
+            }
+          }
+        }
+      }
+    }
+
     return streamText({
       model: google(modelName),
       system,
-      messages,
+      messages: modelMessages,
       tools: runTools,
       abortSignal: signal,
       stopWhen: stepCountIs(15),

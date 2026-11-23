@@ -155,14 +155,22 @@ function ChatContent({
   })
 
   const selectedBot = bots.find((b) => b.id === selectedBotId) ?? bots[0]
+  const activeTargetBotId = isGroup ? (selectedBotId || bots[0]?.id) : undefined
 
   const handleSubmit = (message: PromptInputMessage) => {
     const text = message.text?.trim()
     if (!text) return
 
     sendMessage(
-      { text },
-      isGroup && selectedBotId ? { metadata: { selectedBotId } } : undefined
+      {
+        text,
+        ...(activeTargetBotId
+          ? { metadata: { selectedBotId: activeTargetBotId } }
+          : {}),
+      },
+      activeTargetBotId
+        ? { metadata: { selectedBotId: activeTargetBotId } }
+        : undefined
     )
     setInput("")
   }
