@@ -99,8 +99,8 @@ export const chatAgent = chat.agent({
   },
   run: async ({ messages, tools, signal, streamText, chatId, clientData }) => {
     let bot = null
-    const metadata = clientData as { selectedBotId?: string } | undefined
-    const selectedBotId = metadata?.selectedBotId
+    const metadata = clientData as { botId?: string } | undefined
+    const botId = metadata?.botId
 
     try {
       const chatRecord = await db.query.chats.findFirst({
@@ -114,9 +114,9 @@ export const chatAgent = chat.agent({
         },
       })
       if (chatRecord) {
-        if (chatRecord.kind === "group" && selectedBotId) {
+        if (chatRecord.kind === "group" && botId) {
           bot =
-            chatRecord.members.find((m) => m.botId === selectedBotId)?.bot ??
+            chatRecord.members.find((m) => m.botId === botId)?.bot ??
             chatRecord.members[0]?.bot ??
             null
         } else {
@@ -125,6 +125,14 @@ export const chatAgent = chat.agent({
       }
     } catch (error) {
       console.error("Failed to fetch bot details for system prompt:", error)
+    }
+
+    if (bot) {
+      chat.setUIMessageStreamOptions({
+        messageMetadata: () => ({
+          botId: bot.id,
+        }),
+      })
     }
 
     const system = buildSystemPrompt(bot)
