@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { MonitorIcon } from "lucide-react"
+import { ArrowRightLeftIcon, MonitorIcon } from "lucide-react"
 
 import {
   Tool,
@@ -10,6 +10,8 @@ import {
   ToolInput,
   ToolOutput,
 } from "@/components/ai-elements/tool"
+import { ChatAvatar } from "@/components/chat-avatar"
+import type { ChatBotItem } from "@/components/chat-view"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 
@@ -18,6 +20,16 @@ export interface ScreenOutput {
   width?: number
   height?: number
   mediaType?: string
+  error?: string
+}
+
+export interface HandoffOutput {
+  success?: boolean
+  targetBotId?: string
+  targetBotName?: string
+  targetBotJob?: string
+  reason?: string
+  message?: string
   error?: string
 }
 
@@ -48,6 +60,98 @@ export const TOOL_TITLES: Record<string, string> = {
   keyboardType: "Keyboard Type",
   keyboardPress: "Keyboard Press",
   showScreen: "Screen Capture",
+  handoff: "Handoff to Teammate",
+}
+
+export function HandoffToolPart({
+  part,
+  bots = [],
+}: {
+  part: GenericToolPart
+  bots?: ChatBotItem[]
+}) {
+  const isLoading =
+    part.state === "input-available" || part.state === "input-streaming"
+  const output = part.output as HandoffOutput | undefined
+  const input = part.input as
+    | { botId?: string; botName?: string; reason?: string }
+    | undefined
+  const isError =
+    part.state === "output-error" ||
+    !!part.errorText ||
+    Boolean(output && !output.success)
+
+  const targetName =
+    output?.targetBotName ||
+    input?.botName ||
+    (input?.botId ? bots.find((b) => b.id === input.botId)?.name : null) ||
+    "Teammate"
+
+  const targetBot = bots.find(
+    (b) =>
+      (output?.targetBotId && b.id === output.targetBotId) ||
+      (input?.botId && b.id === input.botId) ||
+      (output?.targetBotName &&
+        b.name.toLowerCase() === output.targetBotName.toLowerCase())
+  )
+
+  const targetAvatarSeed =
+    targetBot?.avatar || targetBot?.id || output?.targetBotId || targetName
+
+  const reason = output?.reason || input?.reason
+
+  if (isLoading) {
+    return (
+      <div className="my-2 flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        <Spinner className="size-4 text-primary" />
+        <span>Handing off to {targetName}...</span>
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="my-2 flex items-center gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <ArrowRightLeftIcon className="size-4 shrink-0" />
+        <span>
+          Handoff failed:{" "}
+          {part.errorText || output?.error || "Unable to transfer conversation"}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="my-2 flex flex-col gap-2 rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs shadow-xs">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {targetAvatarSeed ? (
+            <ChatAvatar seed={targetAvatarSeed} className="size-5 shrink-0" />
+          ) : (
+            <div className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <ArrowRightLeftIcon className="size-3" />
+            </div>
+          )}
+          <span className="font-medium text-foreground">
+            Handed off to{" "}
+            <span className="font-semibold text-primary">{targetName}</span>
+          </span>
+        </div>
+        {output?.targetBotJob && (
+          <Badge variant="secondary" className="text-[10px] font-normal">
+            {output.targetBotJob}
+          </Badge>
+        )}
+      </div>
+
+      {reason && (
+        <p className="pl-7 text-[11px] leading-relaxed text-muted-foreground">
+          <span className="font-medium text-foreground/80">Reason:</span>{" "}
+          {reason}
+        </p>
+      )}
+    </div>
+  )
 }
 
 export function ScreenViewPart({ part }: { part: GenericToolPart }) {
@@ -139,7 +243,13 @@ export function ToolCallPart({ part }: { part: GenericToolPart }) {
   )
 }
 
-export function ToolCall({ part }: { part: GenericToolPart }) {
+export function ToolCall({
+  part,
+  bots = [],
+}: {
+  part: GenericToolPart
+  bots?: ChatBotItem[]
+}) {
   const toolName =
     part.type === "dynamic-tool"
       ? (part.toolName ?? "")
@@ -152,6 +262,8 @@ export function ToolCall({ part }: { part: GenericToolPart }) {
     case "showScreen":
     case "show_screen":
       return <ScreenViewPart part={part} />
+    case "handoff":
+      return <HandoffToolPart part={part} bots={bots} />
     default:
       return <ToolCallPart part={part} />
   }

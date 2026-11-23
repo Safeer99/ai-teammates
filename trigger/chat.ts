@@ -1,24 +1,95 @@
 import { google } from "@ai-sdk/google"
 import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
-import { stepCountIs } from "ai"
+import { stepCountIs, type ToolSet } from "ai"
 
 import { db } from "../db"
 import { getDaytonaClient } from "../lib/daytona"
-import { createComputerUseTools } from "./tools"
+import {
+  createComputerUseTools,
+  createHandoffTool,
+  type TeammateBot,
+} from "./tools"
 
-function buildSystemPrompt(
-  bot?: {
-    name: string
-    job: string
-    instructions?: string | null
-    sandboxId?: string | null
-  } | null
-) {
+export interface BotInfo {
+  id: string
+  name: string
+  job: string
+  instructions?: string | null
+  sandboxId?: string | null
+}
+
+export interface ChatInfo {
+  id: string
+  kind: "direct" | "group"
+  name?: string | null
+}
+
+function buildSystemPrompt({
+  bot,
+  chatInfo,
+  teammates = [],
+}: {
+  bot?: BotInfo | null
+  chatInfo?: ChatInfo | null
+  teammates?: TeammateBot[]
+}) {
   const name = bot?.name || "AI Teammate"
   const job = bot?.job || "AI Assistant"
   const customInstructions =
     bot?.instructions?.trim() ||
     `Assist the user effectively in your role as ${job}.`
+
+  const isGroup = chatInfo?.kind === "group"
+
+  if (isGroup) {
+    const groupName = chatInfo?.name?.trim() || "Group Chat"
+    const teammatesList =
+      teammates.length > 0
+        ? teammates
+            .map(
+              (t) =>
+                `- **${t.name}** (ID: \`${t.id}\`): Role is **${t.job}**${
+                  t.instructions
+                    ? `. Specialty/Focus: ${t.instructions.slice(0, 200)}`
+                    : ""
+                }`
+            )
+            .join("\n")
+        : "No other teammates currently in this group chat."
+
+    return [
+      `You are **${name}**.`,
+      `Your role is: **${job}**.`,
+      `Group Chat Environment:
+You are participating in a multi-agent group chat named "${groupName}".
+In this group chat, you collaborate with the user and other specialized AI teammates.
+You are currently the active speaking bot.`,
+      `Your Role & Purpose:
+- Represent your role as ${job} with deep domain expertise, thoughtfulness, and professionalism.
+- When the user's prompt or question directly relates to your specialty (${job}), answer it directly, comprehensively, and proactively.
+- If the prompt touches both your domain and another teammate's domain, you may provide your domain's perspective and coordinate with your teammate.`,
+      `Your Personal Instructions:
+${customInstructions}`,
+      `Your Fellow Teammates in this Group Chat:
+${teammatesList}`,
+      `Tools & Capabilities in Group Chat:
+You have access to the **handoff** tool:
+- **handoff**: Use this tool when the user's prompt, question, or request is clearly outside your expertise as ${job} and is better suited for one of your teammates listed above.
+  - Parameters:
+    - \`botId\`: The ID of the teammate bot to transfer to (e.g. from the teammates list above).
+    - \`botName\`: The name of the teammate (optional).
+    - \`reason\`: A clear, succinct explanation of why this teammate is the ideal person to handle the user's request.
+
+Group Chat Guidelines & Boundaries:
+1. **Desktop Sandbox Disabled**: You do NOT have access to bash, filesystem tools (readFile/writeFile), or desktop GUI controls (mouse, keyboard, screen capture) in group chats. Those tools are only present in 1-on-1 direct chats with dedicated virtual desktops. Do NOT attempt to run terminal commands, inspect sandbox files, or capture the screen here. Your contributions should be analytical, strategic, conversational, code examples, review, and collaborative guidance.
+2. **When to Handle Directly**: If the user's prompt aligns with your specialty (${job}), or is a general greeting or conversational question, answer directly. DO NOT hand off if you are well-equipped to handle it.
+3. **When to Hand Off**: If the user's prompt specifically requests expertise of another teammate (e.g., asking for database schema/indexing when a Database Architect is present, UI styling when a Frontend Specialist is present, cloud infrastructure when a DevOps Engineer is present), call the \`handoff\` tool.
+4. **After Calling Handoff**: Once you call the \`handoff\` tool, STOP immediately. Do NOT generate any accompanying text, message, or explanation. The handed-off teammate will take over and reply directly to the user. Only the handoff tool call should be emitted.
+5. **Handling Incoming Handoffs**: If you receive a prompt or task that was handed off to you by a teammate (indicated by a handoff message or note in conversation history), immediately take ownership of the user's original request. Answer the user's prompt directly, comprehensively, and enthusiastically using your domain expertise as ${job}. You may warmly acknowledge the handoff (e.g. "Thanks, [Teammate]! I'd be glad to help with this." or "I'll take it from here!"), and then deliver the full answer. Under NO circumstances should you immediately hand the request back to the teammate who handed it to you.`,
+    ].join("\n\n")
+  }
+
+  // Direct (1-on-1) chat
   const sandboxInfo = bot?.sandboxId
     ? `You are situated in an isolated Daytona cloud sandbox environment with ID: ${bot.sandboxId}.`
     : `You are situated in an isolated Daytona cloud sandbox environment.`
@@ -58,47 +129,49 @@ Guidelines:
   ].join("\n\n")
 }
 
-async function getSandboxForChat(chatId: string) {
-  try {
-    const chatRecord = await db.query.chats.findFirst({
-      where: (chats, { eq }) => eq(chats.id, chatId),
-      with: {
-        members: {
-          with: {
-            bot: true,
-          },
-        },
-      },
-    })
-    // Group chats do not use desktop panel / sandbox
-    if (chatRecord?.kind === "group") {
-      return null
-    }
-    const bot = chatRecord?.members[0]?.bot
-    if (!bot?.sandboxId) {
-      return null
-    }
-    const daytona = getDaytonaClient()
-    const sandbox = await daytona.get(bot.sandboxId)
-    if (sandbox.state !== "started") {
-      await sandbox.start()
-    }
-    return sandbox
-  } catch (error) {
-    console.error("Failed to retrieve sandbox for chat:", error)
-    return null
-  }
-}
-
 export const chatAgent = chat.agent({
   id: "chat-agent",
   storage: defaultStorage,
-  tools: async ({ chatId }) => {
-    const sandbox = await getSandboxForChat(chatId)
-    return createComputerUseTools(sandbox)
+  tools: async ({ chatId }): Promise<ToolSet> => {
+    try {
+      const chatRecord = await db.query.chats.findFirst({
+        where: (chats, { eq }) => eq(chats.id, chatId),
+        with: {
+          members: {
+            with: {
+              bot: true,
+            },
+          },
+        },
+      })
+
+      if (chatRecord?.kind === "group") {
+        const allBots = chatRecord.members.map((m) => m.bot)
+        return {
+          handoff: createHandoffTool(allBots),
+        }
+      }
+
+      const bot = chatRecord?.members[0]?.bot
+      if (!bot?.sandboxId) {
+        return createComputerUseTools(null)
+      }
+      const daytona = getDaytonaClient()
+      const sandbox = await daytona.get(bot.sandboxId)
+      if (sandbox.state !== "started") {
+        await sandbox.start()
+      }
+      return createComputerUseTools(sandbox)
+    } catch (error) {
+      console.error("Failed to retrieve tools for chat:", error)
+      return {}
+    }
   },
   run: async ({ messages, tools, signal, streamText, chatId, clientData }) => {
-    let bot = null
+    let bot: BotInfo | null = null
+    let teammates: TeammateBot[] = []
+    let chatInfo: ChatInfo | null = null
+
     const metadata = clientData as { botId?: string } | undefined
     const botId = metadata?.botId
 
@@ -114,13 +187,32 @@ export const chatAgent = chat.agent({
         },
       })
       if (chatRecord) {
-        if (chatRecord.kind === "group" && botId) {
+        chatInfo = {
+          id: chatRecord.id,
+          kind: chatRecord.kind,
+          name: chatRecord.name,
+        }
+
+        const allBots = chatRecord.members.map((m) => m.bot)
+
+        if (chatRecord.kind === "group") {
           bot =
-            chatRecord.members.find((m) => m.botId === botId)?.bot ??
-            chatRecord.members[0]?.bot ??
+            (botId ? allBots.find((b) => b.id === botId) : null) ??
+            allBots[0] ??
             null
+          const currentBotId = bot?.id
+          teammates = currentBotId
+            ? allBots.filter((b) => b.id !== currentBotId)
+            : allBots
+
+          // Ensure handoff tool has currentBotId bound for validation
+          tools = {
+            ...tools,
+            handoff: createHandoffTool(allBots, currentBotId),
+          }
         } else {
-          bot = chatRecord.members[0]?.bot ?? null
+          bot = allBots[0] ?? null
+          teammates = []
         }
       }
     } catch (error) {
@@ -135,7 +227,11 @@ export const chatAgent = chat.agent({
       })
     }
 
-    const system = buildSystemPrompt(bot)
+    const system = buildSystemPrompt({
+      bot,
+      chatInfo,
+      teammates,
+    })
     const modelName =
       process.env.GOOGLE_GENERATIVE_AI_MODEL ||
       process.env.AI_MODEL ||

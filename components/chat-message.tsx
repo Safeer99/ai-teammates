@@ -41,9 +41,37 @@ export function ChatMessage({
     return bots[0]
   }, [isGroup, isAssistant, message.metadata, bots])
 
+  const metadata = message.metadata as
+    | { botId?: string; isHandoffTrigger?: boolean }
+    | undefined
+
+  // Hide synthetic internal handoff triggers from rendering in the chat UI
+  const isHandoffTrigger =
+    metadata?.isHandoffTrigger ||
+    (message.role === "user" &&
+      message.parts.some(
+        (p) => p.type === "text" && p.text?.startsWith("[Handoff from ")
+      ))
+
+  if (isHandoffTrigger) {
+    return null
+  }
+
+  // If a handoff occurred in this message, only render the toolcall part and remove all unnecessary text
+  const hasHandoff = message.parts.some(
+    (p) =>
+      p.type === "tool-handoff" ||
+      (p.type === "dynamic-tool" &&
+        (p as { toolName?: string }).toolName === "handoff")
+  )
+
+  const partsToRender = hasHandoff
+    ? message.parts.filter((p) => p.type !== "text")
+    : message.parts
+
   const messageContent = (
     <MessageContent>
-      {message.parts.map((part, partIndex) => {
+      {partsToRender.map((part, partIndex) => {
         const key = `${message.id}-${messageIndex}-${partIndex}`
 
         if (part.type === "text") {
@@ -55,6 +83,7 @@ export function ChatMessage({
             <ToolCall
               key={key}
               part={part as unknown as GenericToolPart}
+              bots={bots}
             />
           )
         }

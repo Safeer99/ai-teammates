@@ -154,6 +154,97 @@ function ChatContent({
     resume: initialMessages.length > 0,
   })
 
+  // Track handoff tool calls that have already triggered a response
+  const handledHandoffsRef = React.useRef<Set<string>>(new Set())
+
+  // Mark all historical handoffs that were already followed by messages as handled
+  React.useEffect(() => {
+    if (initialMessages.length > 0) {
+      initialMessages.forEach((msg, idx) => {
+        if (msg.role === "assistant" && idx < initialMessages.length - 1) {
+          for (const part of msg.parts) {
+            const isHandoff =
+              part.type === "tool-handoff" ||
+              (part.type === "dynamic-tool" &&
+                (part as { toolName?: string }).toolName === "handoff")
+            if (isHandoff) {
+              const toolPart = part as { toolCallId?: string }
+              const key = toolPart.toolCallId || `${msg.id}-handoff`
+              handledHandoffsRef.current.add(key)
+            }
+          }
+        }
+      })
+    }
+  }, [initialMessages])
+
+  // Automatically update selectedBotId and trigger the newly selected teammate when handoff completes
+  React.useEffect(() => {
+    if (!isGroup || messages.length === 0) return
+    const lastMessage = messages[messages.length - 1]
+    if (lastMessage?.role !== "assistant") return
+
+    for (const part of lastMessage.parts) {
+      const isHandoff =
+        part.type === "tool-handoff" ||
+        (part.type === "dynamic-tool" &&
+          (part as { toolName?: string }).toolName === "handoff")
+
+      if (isHandoff) {
+        const toolPart = part as {
+          toolCallId?: string
+          state?: string
+          output?: {
+            success?: boolean
+            targetBotId?: string
+            targetBotName?: string
+            reason?: string
+          }
+        }
+
+        if (
+          toolPart.state === "output-available" &&
+          toolPart.output?.success &&
+          toolPart.output.targetBotId
+        ) {
+          const targetBotId = toolPart.output.targetBotId
+          const handoffKey = toolPart.toolCallId || `${lastMessage.id}-handoff`
+
+          // 1. Immediately switch selected bot in UI
+          if (targetBotId !== selectedBotId) {
+            onSelectBot(targetBotId)
+          }
+
+          // 2. Once the sender's turn finishes (status === "ready"), automatically trigger the new teammate
+          if (status === "ready" && !handledHandoffsRef.current.has(handoffKey)) {
+            handledHandoffsRef.current.add(handoffKey)
+
+            const senderMetadata = lastMessage.metadata as
+              | { botId?: string }
+              | undefined
+            const senderBot =
+              bots.find((b) => b.id === senderMetadata?.botId) ??
+              bots.find((b) => b.id === selectedBotId)
+            const senderName = senderBot?.name || "your teammate"
+            const targetName = toolPart.output.targetBotName || "teammate"
+
+            sendMessage(
+              {
+                text: `[Handoff from ${senderName}] The request has been handed over to @${targetName}. Please take over and respond directly to the user's request.`,
+              },
+              {
+                metadata: {
+                  botId: targetBotId,
+                  isHandoffTrigger: true,
+                },
+              }
+            )
+          }
+        }
+      }
+    }
+  }, [messages, isGroup, selectedBotId, onSelectBot, status, sendMessage, bots])
+
   const selectedBot = bots.find((b) => b.id === selectedBotId) ?? bots[0]
 
   const handleSubmit = (message: PromptInputMessage) => {
