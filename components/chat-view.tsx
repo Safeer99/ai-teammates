@@ -21,10 +21,7 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation"
-import {
-  Message,
-  MessageContent,
-} from "@/components/ai-elements/message"
+import { Message, MessageContent } from "@/components/ai-elements/message"
 import {
   PromptInput,
   PromptInputBody,
@@ -45,13 +42,10 @@ import { GroupChatAvatar } from "@/components/group-chat-avatar"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { chatAgent } from "@/trigger/chat"
-import { ChatMessageItem } from "./chat-message-item"
 
 export interface ChatBotItem {
   id: string
   name: string
-  job?: string | null
-  instructions?: string | null
   avatar?: string | null
   job?: string | null
 }

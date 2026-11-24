@@ -81,27 +81,6 @@ You are a dedicated AI teammate collaborating directly with the user in a privat
 ${customInstructions}`,
     `Environment context:
 ${sandboxInfo}`,
-    `Long-Term Memory Management:
-You have a persistent long-term memory system across all conversations.
-The goal of this memory is to remember key facts, user preferences, projects, and decisions across all conversations, including group chats.
-- MANDATORY Tool Calling Rule (Save Immediately):
-  - Whenever the user shares ANY personal preference (e.g. favorite movie, food, drinks, hobbies), personal background, project details, architecture decisions, or specific instructions:
-    YOU MUST ACTUALLY CALL "updateMemory" in this exact turn to save it.
-    DO NOT simply say in text "I have noted that down" or "I will remember that" without executing the tool call! A text promise does not save anything to memory.
-  - To save without losing existing memories:
-    First call "recallMemory" to inspect existing notes, combine them with the new information, and call "updateMemory" to save it immediately.
-- When to Recall Memory:
-  - Whenever the user asks you to recall something ("What movie do I like?", "Do you remember...", "What did I say..."), or whenever prior context would improve your answer, call "recallMemory" and answer from it.
-- ABSOLUTE PROHIBITIONS (NEVER LEAK SYSTEM INTERNALS):
-  - NEVER output the word "MEMORY.md" under any circumstances.
-  - NEVER mention files, file paths, extensions, sandboxes, filesystems, tools, or technical storage.
-  - NEVER mention technical concepts like "1:1 chat", "private conversation", "session", or "application structure".
-  - Always speak naturally using everyday phrasing with words like "my memory":
-    - "I'll keep that in mind!"
-    - "Noted! Good to know you like Dune."
-    - "From my memory, you mentioned that you like Dune!"
-    - "My memory is drawing a blank on that—remind me what you prefer?"
-  - Act as if you have natural human memory, keeping the technical saving mechanism completely behind the scenes.`,
     `Computer Use & Tools:
 You have access to a full computer use toolkit connected to your Daytona sandbox environment:
 - bash: Execute bash shell commands, inspect system info, run scripts, install tools.
@@ -119,8 +98,7 @@ You have access to a full computer use toolkit connected to your Daytona sandbox
 Guidelines:
 - When asked to perform desktop tasks or interact with GUI applications, use viewScreen first if you need to know the visual state or coordinates.
 - Use showScreen whenever the user explicitly requests to see the screen or visual output.
-- When performing terminal or code operations, use bash and filesystem tools as appropriate.
-- Actively maintain and reference your memory using the tools, keeping all technical storage details invisible to the user.`,
+- When performing terminal or code operations, use bash and filesystem tools as appropriate.`,
   ].join("\n\n")
 }
 
@@ -197,7 +175,7 @@ export const chatAgent = chat.agent({
     const botId = metadata?.botId
 
     try {
-      chatRecord = await db.query.chats.findFirst({
+      const chatRecord = await db.query.chats.findFirst({
         where: (chats, { eq }) => eq(chats.id, chatId),
         with: {
           members: {
@@ -246,102 +224,6 @@ export const chatAgent = chat.agent({
       process.env.GOOGLE_GENERATIVE_AI_MODEL ||
       process.env.AI_MODEL ||
       "gemini-3.5-flash-lite"
-
-    let activeBot = bot
-    let handedOffFrom: typeof bot = null
-
-    const botSandboxCache = new Map<string, Sandbox>()
-    const getActiveBotSandbox = async (): Promise<Sandbox | null> => {
-      const currentBot = activeBot
-      if (!currentBot?.sandboxId) return null
-      const cached = botSandboxCache.get(currentBot.sandboxId)
-      if (cached) {
-        if (cached.state !== "started") {
-          await cached.start()
-        }
-        return cached
-      }
-      const s = await getSandboxForBot(currentBot.sandboxId)
-      if (s) {
-        botSandboxCache.set(currentBot.sandboxId, s)
-      }
-      return s
-    }
-
-    const handoffTool = isGroup
-      ? createHandoffTool(allBots, (target) => {
-          handedOffFrom = activeBot
-          activeBot = target
-        })
-      : undefined
-
-    const runTools = isGroup
-      ? {
-          handoff: handoffTool!,
-          recallMemory: createRecallMemoryTool(getActiveBotSandbox),
-          updateMemory: createUpdateMemoryTool(getActiveBotSandbox),
-          readFile: createReadFileTool(getActiveBotSandbox),
-          writeFile: createWriteFileTool(getActiveBotSandbox),
-          listFiles: createListFilesTool(getActiveBotSandbox),
-          bash: createBashTool(getActiveBotSandbox),
-        }
-      : {
-          ...createComputerUseTools(getActiveBotSandbox),
-          ...(handoffTool ? { handoff: handoffTool } : {}),
-        }
-
-    if (activeBot) {
-      chat.setUIMessageStreamOptions({
-        messageMetadata: () => ({
-          botId: activeBot?.id,
-          botName: activeBot?.name,
-          botAvatar: activeBot?.avatar,
-          ...(handedOffFrom
-            ? {
-                handedOffFromBotId: handedOffFrom.id,
-                handedOffFromBotName: handedOffFrom.name,
-              }
-            : {}),
-        }),
-      })
-    }
-
-    const modelMessages = [...messages]
-    if (isGroup && bot && modelMessages.length > 0) {
-      const lastIdx = modelMessages.length - 1
-      const lastMsg = modelMessages[lastIdx]
-      if (lastMsg && lastMsg.role === "user") {
-        if (typeof lastMsg.content === "string") {
-          if (!lastMsg.content.includes(`@${bot.name}`)) {
-            modelMessages[lastIdx] = {
-              ...lastMsg,
-              content: `[@${bot.name}] ${lastMsg.content}`,
-            }
-          }
-        } else if (Array.isArray(lastMsg.content)) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const firstTextPart = (lastMsg.content as any[]).find(
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (p: any) => p.type === "text"
-          ) as { type: "text"; text: string } | undefined
-          if (
-            firstTextPart &&
-            typeof firstTextPart.text === "string" &&
-            !firstTextPart.text.includes(`@${bot.name}`)
-          ) {
-            modelMessages[lastIdx] = {
-              ...lastMsg,
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              content: (lastMsg.content as any[]).map((p: any) =>
-                p === firstTextPart
-                  ? { ...p, text: `[@${bot.name}] ${firstTextPart.text}` }
-                  : p
-              ),
-            }
-          }
-        }
-      }
-    }
 
     return streamText({
       model: google(modelName),
