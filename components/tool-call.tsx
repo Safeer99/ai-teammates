@@ -24,6 +24,9 @@ export interface ScreenOutput {
 }
 
 export interface HandoffOutput {
+  botId?: string
+  name?: string
+  job?: string
   success?: boolean
   targetBotId?: string
   targetBotName?: string
@@ -74,31 +77,39 @@ export function HandoffToolPart({
     part.state === "input-available" || part.state === "input-streaming"
   const output = part.output as HandoffOutput | undefined
   const input = part.input as
-    | { botId?: string; botName?: string; reason?: string }
+    | { botId?: string; botName?: string; reason?: string; note?: string }
     | undefined
   const isError =
     part.state === "output-error" ||
-    !!part.errorText ||
-    Boolean(output && !output.success)
+    Boolean(part.errorText) ||
+    Boolean(output && output.success === false)
 
-  const targetName =
-    output?.targetBotName ||
-    input?.botName ||
-    (input?.botId ? bots.find((b) => b.id === input.botId)?.name : null) ||
-    "Teammate"
-
+  const targetId = output?.botId || output?.targetBotId || input?.botId
   const targetBot = bots.find(
     (b) =>
-      (output?.targetBotId && b.id === output.targetBotId) ||
-      (input?.botId && b.id === input.botId) ||
+      (targetId && b.id === targetId) ||
+      (output?.name && b.name.toLowerCase() === output.name.toLowerCase()) ||
       (output?.targetBotName &&
         b.name.toLowerCase() === output.targetBotName.toLowerCase())
   )
 
-  const targetAvatarSeed =
-    targetBot?.avatar || targetBot?.id || output?.targetBotId || targetName
+  const targetName =
+    targetBot?.name ||
+    output?.name ||
+    output?.targetBotName ||
+    input?.botName ||
+    "Teammate"
 
-  const reason = output?.reason || input?.reason
+  const targetJob =
+    targetBot?.job || output?.job || output?.targetBotJob
+
+  const targetAvatarSeed =
+    targetBot?.avatar || targetBot?.id || targetId || targetName
+
+  const reason =
+    output?.reason ||
+    input?.reason ||
+    input?.note
 
   if (isLoading) {
     return (
@@ -137,9 +148,9 @@ export function HandoffToolPart({
             <span className="font-semibold text-primary">{targetName}</span>
           </span>
         </div>
-        {output?.targetBotJob && (
+        {targetJob && (
           <Badge variant="secondary" className="text-[10px] font-normal">
-            {output.targetBotJob}
+            {targetJob}
           </Badge>
         )}
       </div>

@@ -7,7 +7,7 @@ import { getDaytonaClient } from "../lib/daytona"
 import {
   createComputerUseTools,
   createHandoffTool,
-  type TeammateBot,
+  type Handoff,
 } from "./tools"
 
 export interface BotInfo {
@@ -27,11 +27,11 @@ export interface ChatInfo {
 function buildSystemPrompt({
   bot,
   chatInfo,
-  teammates = [],
+  allBots = [],
 }: {
   bot?: BotInfo | null
   chatInfo?: ChatInfo | null
-  teammates?: TeammateBot[]
+  allBots?: BotInfo[]
 }) {
   const name = bot?.name || "AI Teammate"
   const job = bot?.job || "AI Assistant"
@@ -43,49 +43,22 @@ function buildSystemPrompt({
 
   if (isGroup) {
     const groupName = chatInfo?.name?.trim() || "Group Chat"
-    const teammatesList =
-      teammates.length > 0
-        ? teammates
-            .map(
-              (t) =>
-                `- **${t.name}** (ID: \`${t.id}\`): Role is **${t.job}**${
-                  t.instructions
-                    ? `. Specialty/Focus: ${t.instructions.slice(0, 200)}`
-                    : ""
-                }`
-            )
-            .join("\n")
-        : "No other teammates currently in this group chat."
+    const teammates = allBots
+      .filter((b) => b.id !== bot?.id)
+      .map(
+        (t) =>
+          `- ${t.name} (id: ${t.id}): ${t.job}${
+            t.instructions ? `. Focus: ${t.instructions.slice(0, 150)}` : ""
+          }`
+      )
+      .join("\n")
 
     return [
-      `You are **${name}**.`,
-      `Your role is: **${job}**.`,
-      `Group Chat Environment:
-You are participating in a multi-agent group chat named "${groupName}".
-In this group chat, you collaborate with the user and other specialized AI teammates.
-You are currently the active speaking bot.`,
-      `Your Role & Purpose:
-- Represent your role as ${job} with deep domain expertise, thoughtfulness, and professionalism.
-- When the user's prompt or question directly relates to your specialty (${job}), answer it directly, comprehensively, and proactively.
-- If the prompt touches both your domain and another teammate's domain, you may provide your domain's perspective and coordinate with your teammate.`,
-      `Your Personal Instructions:
-${customInstructions}`,
-      `Your Fellow Teammates in this Group Chat:
-${teammatesList}`,
-      `Tools & Capabilities in Group Chat:
-You have access to the **handoff** tool:
-- **handoff**: Use this tool when the user's prompt, question, or request is clearly outside your expertise as ${job} and is better suited for one of your teammates listed above.
-  - Parameters:
-    - \`botId\`: The ID of the teammate bot to transfer to (e.g. from the teammates list above).
-    - \`botName\`: The name of the teammate (optional).
-    - \`reason\`: A clear, succinct explanation of why this teammate is the ideal person to handle the user's request.
-
-Group Chat Guidelines & Boundaries:
-1. **Desktop Sandbox Disabled**: You do NOT have access to bash, filesystem tools (readFile/writeFile), or desktop GUI controls (mouse, keyboard, screen capture) in group chats. Those tools are only present in 1-on-1 direct chats with dedicated virtual desktops. Do NOT attempt to run terminal commands, inspect sandbox files, or capture the screen here. Your contributions should be analytical, strategic, conversational, code examples, review, and collaborative guidance.
-2. **When to Handle Directly**: If the user's prompt aligns with your specialty (${job}), or is a general greeting or conversational question, answer directly. DO NOT hand off if you are well-equipped to handle it.
-3. **When to Hand Off**: If the user's prompt specifically requests expertise of another teammate (e.g., asking for database schema/indexing when a Database Architect is present, UI styling when a Frontend Specialist is present, cloud infrastructure when a DevOps Engineer is present), call the \`handoff\` tool.
-4. **After Calling Handoff**: Once you call the \`handoff\` tool, STOP immediately. Do NOT generate any accompanying text, message, or explanation. The handed-off teammate will take over and reply directly to the user. Only the handoff tool call should be emitted.
-5. **Handling Incoming Handoffs**: If you receive a prompt or task that was handed off to you by a teammate (indicated by a handoff message or note in conversation history), immediately take ownership of the user's original request. Answer the user's prompt directly, comprehensively, and enthusiastically using your domain expertise as ${job}. You may warmly acknowledge the handoff (e.g. "Thanks, [Teammate]! I'd be glad to help with this." or "I'll take it from here!"), and then deliver the full answer. Under NO circumstances should you immediately hand the request back to the teammate who handed it to you.`,
+      `You are ${name}, an AI teammate. Your job: ${job}`,
+      `You are in a group chat called "${groupName}", together with the user and these other teammates:\n\n${teammates}`,
+      "The user addresses each message to one teammate, and this one is yours: either they picked you, or a teammate handed it to you. Earlier replies in this conversation may have been written by other teammates rather than by you. Use them as context, and do not present their work as your own.",
+      "Besides any other tools you have a handoff tool. Call it when a request clearly belongs to a teammate's job rather than yours, with their id and a short note on what is needed. That teammate then takes over and answers in your place, so write nothing more once you have called it. Do not hand off what you can do well yourself, or because a request is merely hard, and never pass a request back to a teammate who handed it to you. When nobody fits better, answer it yourself.",
+      `Your personal instructions:\n${customInstructions}`,
     ].join("\n\n")
   }
 
@@ -132,7 +105,7 @@ Guidelines:
 export const chatAgent = chat.agent({
   id: "chat-agent",
   storage: defaultStorage,
-  tools: async ({ chatId }): Promise<ToolSet> => {
+  tools: async ({ chatId, clientData }): Promise<ToolSet> => {
     try {
       const chatRecord = await db.query.chats.findFirst({
         where: (chats, { eq }) => eq(chats.id, chatId),
@@ -145,14 +118,40 @@ export const chatAgent = chat.agent({
         },
       })
 
-      if (chatRecord?.kind === "group") {
-        const allBots = chatRecord.members.map((m) => m.bot)
+      if (!chatRecord) return {}
+
+      const allBots = chatRecord.members.map((m) => m.bot)
+      const metadata = clientData as { botId?: string } | undefined
+      const botId = metadata?.botId
+      const bot =
+        (botId ? allBots.find((b) => b.id === botId) : null) ??
+        allBots[0] ??
+        null
+
+      const held = new Set(bot ? [bot.id] : [])
+
+      if (chatRecord.kind === "group") {
         return {
-          handoff: createHandoffTool(allBots),
+          handoff: createHandoffTool((targetId) => {
+            const target = allBots.find(
+              (b) =>
+                b.id === targetId ||
+                b.name.toLowerCase().trim() === targetId.toLowerCase().trim()
+            )
+            if (!target) {
+              throw new Error("No teammate in this chat has that id.")
+            }
+            if (held.has(target.id)) {
+              throw new Error(
+                `${target.name} already had this request. Answer it yourself.`
+              )
+            }
+            held.add(target.id)
+            return { botId: target.id, name: target.name, job: target.job }
+          }),
         }
       }
 
-      const bot = chatRecord?.members[0]?.bot
       if (!bot?.sandboxId) {
         return createComputerUseTools(null)
       }
@@ -169,7 +168,7 @@ export const chatAgent = chat.agent({
   },
   run: async ({ messages, tools, signal, streamText, chatId, clientData }) => {
     let bot: BotInfo | null = null
-    let teammates: TeammateBot[] = []
+    let allBots: BotInfo[] = []
     let chatInfo: ChatInfo | null = null
 
     const metadata = clientData as { botId?: string } | undefined
@@ -193,26 +192,15 @@ export const chatAgent = chat.agent({
           name: chatRecord.name,
         }
 
-        const allBots = chatRecord.members.map((m) => m.bot)
+        allBots = chatRecord.members.map((m) => m.bot)
 
         if (chatRecord.kind === "group") {
           bot =
             (botId ? allBots.find((b) => b.id === botId) : null) ??
             allBots[0] ??
             null
-          const currentBotId = bot?.id
-          teammates = currentBotId
-            ? allBots.filter((b) => b.id !== currentBotId)
-            : allBots
-
-          // Ensure handoff tool has currentBotId bound for validation
-          tools = {
-            ...tools,
-            handoff: createHandoffTool(allBots, currentBotId),
-          }
         } else {
           bot = allBots[0] ?? null
-          teammates = []
         }
       }
     } catch (error) {
@@ -230,7 +218,7 @@ export const chatAgent = chat.agent({
     const system = buildSystemPrompt({
       bot,
       chatInfo,
-      teammates,
+      allBots,
     })
     const modelName =
       process.env.GOOGLE_GENERATIVE_AI_MODEL ||
@@ -242,6 +230,28 @@ export const chatAgent = chat.agent({
       system,
       messages,
       tools,
+      prepareStep: ({ steps }) => {
+        if (chatInfo?.kind !== "group") return undefined
+
+        const handoff = steps
+          .flatMap((step) => step.toolResults)
+          .findLast((result) => result.toolName === "handoff")
+
+        if (!handoff || !handoff.output) return undefined
+
+        const handoffOutput = handoff.output as Handoff
+        const current = allBots.find((b) => b.id === handoffOutput.botId)
+
+        if (!current) return undefined
+
+        return {
+          instructions: buildSystemPrompt({
+            bot: current,
+            chatInfo,
+            allBots,
+          }),
+        }
+      },
       abortSignal: signal,
       stopWhen: stepCountIs(15),
     })

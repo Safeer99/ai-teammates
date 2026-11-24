@@ -19,6 +19,53 @@ export interface ChatMessageProps {
   bots?: ChatBotItem[]
 }
 
+function isHandoffOutputPart(part: unknown): part is {
+  type: string
+  state: "output-available"
+  output: { botId?: string; name?: string }
+} {
+  const p = part as {
+    type?: string
+    toolName?: string
+    state?: string
+    output?: { botId?: string; name?: string }
+  }
+  const isHandoff =
+    p.type === "tool-handoff" ||
+    (p.type === "dynamic-tool" && p.toolName === "handoff")
+  return Boolean(isHandoff && p.state === "output-available" && p.output?.botId)
+}
+
+interface MessageSection {
+  author?: ChatBotItem
+  parts: UIMessage["parts"]
+}
+
+function splitByAuthor(
+  message: UIMessage,
+  bots: ChatBotItem[]
+): MessageSection[] {
+  const findBot = (botId?: string) => bots.find((b) => b.id === botId)
+  const initialBotId = (message.metadata as { botId?: string } | undefined)
+    ?.botId
+
+  let section: MessageSection = {
+    author: findBot(initialBotId) ?? bots[0],
+    parts: [],
+  }
+  const sections: MessageSection[] = [section]
+
+  for (const part of message.parts) {
+    section.parts.push(part)
+    if (isHandoffOutputPart(part)) {
+      section = { author: findBot(part.output.botId), parts: [] }
+      sections.push(section)
+    }
+  }
+
+  return sections.filter((s) => s.parts.length > 0)
+}
+
 export function ChatMessage({
   message,
   messageIndex,
@@ -27,19 +74,10 @@ export function ChatMessage({
 }: ChatMessageProps) {
   const isAssistant = message.role === "assistant"
 
-  const bot = React.useMemo(() => {
-    if (!isGroup || !isAssistant) return undefined
-
-    const metadata = message.metadata as { botId?: string } | undefined
-    const directBotId = metadata?.botId
-
-    if (directBotId) {
-      const found = bots.find((b) => b.id === directBotId)
-      if (found) return found
-    }
-
-    return bots[0]
-  }, [isGroup, isAssistant, message.metadata, bots])
+  const sections = React.useMemo(() => {
+    if (!isGroup || !isAssistant) return null
+    return splitByAuthor(message, bots)
+  }, [isGroup, isAssistant, message, bots])
 
   const metadata = message.metadata as
     | { botId?: string; isHandoffTrigger?: boolean }
@@ -57,70 +95,104 @@ export function ChatMessage({
     return null
   }
 
-  // If a handoff occurred in this message, only render the toolcall part and remove all unnecessary text
-  const hasHandoff = message.parts.some(
-    (p) =>
-      p.type === "tool-handoff" ||
-      (p.type === "dynamic-tool" &&
-        (p as { toolName?: string }).toolName === "handoff")
-  )
-
-  const partsToRender = hasHandoff
-    ? message.parts.filter((p) => p.type !== "text")
-    : message.parts
-
-  const messageContent = (
-    <MessageContent>
-      {partsToRender.map((part, partIndex) => {
-        const key = `${message.id}-${messageIndex}-${partIndex}`
-
-        if (part.type === "text") {
-          return <MessageResponse key={key}>{part.text}</MessageResponse>
-        }
-
-        if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) {
-          return (
-            <ToolCall
-              key={key}
-              part={part as unknown as GenericToolPart}
-              bots={bots}
-            />
-          )
-        }
-
-        return null
-      })}
-    </MessageContent>
-  )
-
-  if (isGroup && isAssistant) {
+  if (isGroup && isAssistant && sections) {
     return (
-      <Message
-        from={message.role}
-        className="flex-row items-start gap-3"
-      >
-        {bot && (
-          <ChatAvatar
-            seed={bot.avatar || bot.id}
-            alt={bot.name}
-            className="mt-0.5 size-7 shrink-0"
-          />
-        )}
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          {bot?.name && (
-            <span className="text-xs font-medium text-muted-foreground select-none">
-              {bot.name}
-            </span>
-          )}
-          {messageContent}
-        </div>
-      </Message>
+      <div className="flex flex-col gap-4">
+        {sections.map((section, secIdx) => {
+          const hasHandoffInThisSection = section.parts.some(
+            (p) =>
+              p.type === "tool-handoff" ||
+              (p.type === "dynamic-tool" &&
+                (p as { toolName?: string }).toolName === "handoff")
+          )
+
+          // If a handoff occurred in this section, only render the toolcall part and remove all unnecessary text
+          const partsToRender = hasHandoffInThisSection
+            ? section.parts.filter((p) => p.type !== "text")
+            : section.parts
+
+          if (partsToRender.length === 0) return null
+
+          const author = section.author
+
+          return (
+            <Message
+              key={`${message.id}-sec-${secIdx}`}
+              from={message.role}
+              className="flex-row items-start gap-3"
+            >
+              {author && (
+                <ChatAvatar
+                  seed={author.avatar || author.id}
+                  alt={author.name}
+                  className="mt-0.5 size-7 shrink-0"
+                />
+              )}
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                {author?.name && (
+                  <span className="text-xs font-medium text-muted-foreground select-none">
+                    {author.name}
+                  </span>
+                )}
+                <MessageContent>
+                  {partsToRender.map((part, partIndex) => {
+                    const key = `${message.id}-${messageIndex}-${secIdx}-${partIndex}`
+
+                    if (part.type === "text") {
+                      return (
+                        <MessageResponse key={key}>
+                          {part.text}
+                        </MessageResponse>
+                      )
+                    }
+
+                    if (
+                      part.type === "dynamic-tool" ||
+                      part.type.startsWith("tool-")
+                    ) {
+                      return (
+                        <ToolCall
+                          key={key}
+                          part={part as unknown as GenericToolPart}
+                          bots={bots}
+                        />
+                      )
+                    }
+
+                    return null
+                  })}
+                </MessageContent>
+              </div>
+            </Message>
+          )
+        })}
+      </div>
     )
   }
 
   return (
     <Message from={message.role}>
-      {messageContent}
+      <MessageContent>
+        {message.parts.map((part, partIndex) => {
+          const key = `${message.id}-${messageIndex}-${partIndex}`
+
+          if (part.type === "text") {
+            return <MessageResponse key={key}>{part.text}</MessageResponse>
+          }
+
+          if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) {
+            return (
+              <ToolCall
+                key={key}
+                part={part as unknown as GenericToolPart}
+                bots={bots}
+              />
+            )
+          }
+
+          return null
+        })}
+      </MessageContent>
     </Message>
   )
 }

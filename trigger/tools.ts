@@ -425,84 +425,29 @@ export function createComputerUseTools(sandbox?: Sandbox | null) {
   }
 }
 
-export interface TeammateBot {
-  id: string
+export interface Handoff {
+  botId: string
   name: string
-  job: string
-  instructions?: string | null
+  job?: string
 }
 
-export const createHandoffTool = (
-  availableBots: TeammateBot[] = [],
-  currentBotId?: string
-) =>
-  tool({
+export function createHandoffTool(
+  handoff: (botId: string) => Handoff | Promise<Handoff>
+) {
+  return tool({
     description:
-      "Hand off the conversation to another teammate bot in the group chat when the user's prompt or task is better suited for their role and expertise.",
+      "Hand the person's request to another teammate in this group chat, when it belongs to their job rather than yours. They take over and answer in your place, so call this instead of answering.",
     inputSchema: z.object({
       botId: z
         .string()
         .describe(
-          "The unique ID of the teammate bot to hand off the conversation to."
+          "The id of the teammate to hand off to, from the list of teammates in this chat"
         ),
-      botName: z
+      note: z
         .string()
         .optional()
-        .describe(
-          "The name of the teammate bot to hand off to (optional, for convenience)."
-        ),
-      reason: z
-        .string()
-        .describe(
-          "A clear explanation of why this teammate is better suited for the user's request."
-        ),
+        .describe("What the teammate should do, in a sentence or two"),
     }),
-    execute: async ({ botId, botName, reason }) => {
-      const target = availableBots.find(
-        (b) =>
-          b.id === botId ||
-          (botName &&
-            b.name.toLowerCase().trim() === botName.toLowerCase().trim())
-      )
-
-      if (!target) {
-        const botList = availableBots
-          .map((b) => `${b.name} (id: ${b.id}, role: ${b.job})`)
-          .join(", ")
-        return {
-          success: false,
-          error: `Teammate bot not found. Available bots in this chat: ${
-            botList || "None"
-          }`,
-        }
-      }
-
-      if (currentBotId && target.id === currentBotId) {
-        return {
-          success: false,
-          error: `Cannot hand off to yourself (${target.name}). You are already handling this conversation. Please answer directly or hand off to a different teammate.`,
-        }
-      }
-
-      return {
-        success: true,
-        targetBotId: target.id,
-        targetBotName: target.name,
-        targetBotJob: target.job,
-        reason,
-        message: `Handoff initiated to ${target.name} (${target.job}). Reason: ${reason}`,
-      }
-    },
-    toModelOutput: ({ output }) => {
-      if (!output || !output.success) {
-        return {
-          type: "text",
-          value: `Handoff failed: ${output?.error || "Unknown error"}`,
-        }
-      }
-      return {
-        type: "text",
-        value: `Successfully handed off to ${output.targetBotName} (${output.targetBotJob}). The handoff is complete and ${output.targetBotName} will reply directly to the user next. Do NOT generate any text response or explanation. End your turn immediately with no text.`,
-      }
-    },
+    execute: async ({ botId }) => handoff(botId),
   })
+}
