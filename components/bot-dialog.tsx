@@ -90,7 +90,7 @@ export interface BotDialogProps {
   onOpenChange?: (open: boolean) => void
   trigger?: React.ReactNode
   children?: React.ReactNode
-  onSuccess?: () => void
+  onSuccess?: (chatId?: string) => void
 }
 
 export function BotDialog({
@@ -260,8 +260,12 @@ export function BotDialog({
           description: `${values.name} was successfully updated.`,
           type: "success",
         })
+
+        handleOpenChange(false)
+        router.refresh()
+        onSuccess?.()
       } else {
-        await createBot({
+        const result = await createBot({
           name: values.name,
           job: values.job,
           instructions: values.instructions || null,
@@ -273,11 +277,15 @@ export function BotDialog({
           description: `${values.name} was successfully created.`,
           type: "success",
         })
-      }
 
-      handleOpenChange(false)
-      router.refresh()
-      onSuccess?.()
+        handleOpenChange(false)
+        onSuccess?.(result?.chat?.id)
+        if (result?.chat?.id) {
+          router.push(`/chats/${result.chat.id}`)
+        } else {
+          router.refresh()
+        }
+      }
     } catch (err) {
       console.error(
         isEdit ? "Failed to update bot:" : "Failed to create bot:",

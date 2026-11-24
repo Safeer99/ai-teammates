@@ -633,3 +633,30 @@ export function createComputerUseTools(sandbox?: SandboxProvider) {
     showScreen: createShowScreenTool(sandbox),
   }
 }
+
+export interface Handoff {
+  botId: string
+  name: string
+  job?: string
+}
+
+export function createHandoffTool(
+  handoff: (botId: string) => Handoff | Promise<Handoff>
+) {
+  return tool({
+    description:
+      "Hand the person's request to another teammate in this group chat, when it belongs to their job rather than yours. They take over and answer in your place, so call this instead of answering.",
+    inputSchema: z.object({
+      botId: z
+        .string()
+        .describe(
+          "The id of the teammate to hand off to, from the list of teammates in this chat"
+        ),
+      note: z
+        .string()
+        .optional()
+        .describe("What the teammate should do, in a sentence or two"),
+    }),
+    execute: async ({ botId }) => handoff(botId),
+  })
+}

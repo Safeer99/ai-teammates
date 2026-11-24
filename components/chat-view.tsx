@@ -40,8 +40,10 @@ import {
   PromptInputTools,
 } from "@/components/ai-elements/prompt-input"
 import { ChatAvatar } from "@/components/chat-avatar"
+import { ChatMessage } from "@/components/chat-message"
 import { GroupChatAvatar } from "@/components/group-chat-avatar"
 import { Spinner } from "@/components/ui/spinner"
+import { cn } from "@/lib/utils"
 import type { chatAgent } from "@/trigger/chat"
 import { ChatMessageItem } from "./chat-message-item"
 
@@ -51,6 +53,7 @@ export interface ChatBotItem {
   job?: string | null
   instructions?: string | null
   avatar?: string | null
+  job?: string | null
 }
 
 export interface ChatViewProps {
@@ -75,7 +78,7 @@ export function ChatView({
     accessToken: ({ chatId }) => mintChatAccessToken(chatId),
     startSession: ({ chatId, clientData }) =>
       startChatSession({ chatId, clientData }),
-    clientData: selectedBotId ? { selectedBotId } : {},
+    clientData: selectedBotId ? { selectedBotId, botId: selectedBotId } : {},
   })
 
   React.useEffect(() => {
@@ -89,6 +92,7 @@ export function ChatView({
         transport as unknown as { setClientData: (data: unknown) => void }
       ).setClientData({
         selectedBotId,
+        botId: selectedBotId,
       })
     }
   }, [selectedBotId, transport])
@@ -154,22 +158,48 @@ function ChatContent({
     resume: initialMessages.length > 0,
   })
 
+  // Automatically switch selected bot dropdown when handoff completes
+  React.useEffect(() => {
+    if (!isGroup || messages.length === 0) return
+    const lastMessage = messages[messages.length - 1]
+    if (lastMessage?.role !== "assistant") return
+
+    for (const part of lastMessage.parts) {
+      const isHandoff =
+        part.type === "tool-handoff" ||
+        (part.type === "dynamic-tool" &&
+          (part as { toolName?: string }).toolName === "handoff")
+
+      if (isHandoff) {
+        const toolPart = part as {
+          state?: string
+          output?: {
+            botId?: string
+            targetBotId?: string
+          }
+        }
+
+        if (toolPart.state === "output-available") {
+          const targetBotId =
+            toolPart.output?.botId || toolPart.output?.targetBotId
+          if (targetBotId && targetBotId !== selectedBotId) {
+            onSelectBot(targetBotId)
+          }
+        }
+      }
+    }
+  }, [messages, isGroup, selectedBotId, onSelectBot])
+
   const selectedBot = bots.find((b) => b.id === selectedBotId) ?? bots[0]
-  const activeTargetBotId = isGroup ? (selectedBotId || bots[0]?.id) : undefined
 
   const handleSubmit = (message: PromptInputMessage) => {
     const text = message.text?.trim()
     if (!text) return
 
     sendMessage(
-      {
-        text,
-        ...(activeTargetBotId
-          ? { metadata: { selectedBotId: activeTargetBotId } }
-          : {}),
-      },
-      activeTargetBotId
-        ? { metadata: { selectedBotId: activeTargetBotId } }
+      { text },
+      isGroup && selectedBotId
+        ? { metadata: { botId: selectedBotId } }
         : undefined
     )
     setInput("")
@@ -197,47 +227,46 @@ function ChatContent({
             />
           ) : (
             messages.map((message, messageIndex) => (
-              <ChatMessageItem
+              <ChatMessage
                 key={`${message.id}-${messageIndex}`}
                 message={message}
                 messageIndex={messageIndex}
-                allMessages={messages}
                 isGroup={isGroup}
                 bots={bots}
-                isGenerating={isGenerating}
               />
             ))
           )}
 
           {status === "submitted" && (
-            <Message from="assistant">
-              {isGroup && selectedBot ? (
-                <div className="flex w-full items-start gap-3">
-                  <ChatAvatar
-                    seed={selectedBot.avatar || selectedBot.id}
-                    className="mt-0.5 size-7 shrink-0 rounded-full ring-1 ring-border/50"
-                    alt={selectedBot.name}
-                  />
-                  <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <span className="text-xs leading-none font-semibold text-foreground/80">
-                      {selectedBot.name}
-                    </span>
-                    <MessageContent>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Spinner className="size-4" />
-                        <span>Thinking...</span>
-                      </div>
-                    </MessageContent>
-                  </div>
-                </div>
-              ) : (
+            <Message
+              from="assistant"
+              className={cn(isGroup && "flex-row items-start gap-3")}
+            >
+              {isGroup && selectedBot && (
+                <ChatAvatar
+                  seed={selectedBot.avatar || selectedBot.id}
+                  alt={selectedBot.name}
+                  className="mt-0.5 size-7 shrink-0"
+                />
+              )}
+              <div
+                className={cn(
+                  "flex flex-col gap-1",
+                  isGroup && "min-w-0 flex-1"
+                )}
+              >
+                {isGroup && selectedBot?.name && (
+                  <span className="text-xs font-medium text-muted-foreground select-none">
+                    {selectedBot.name}
+                  </span>
+                )}
                 <MessageContent>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Spinner className="size-4" />
                     <span>Thinking...</span>
                   </div>
                 </MessageContent>
-              )}
+              </div>
             </Message>
           )}
 
@@ -279,6 +308,7 @@ function ChatContent({
                         onSelectBot(val)
                       }
                     }}
+                    disabled={status === "submitted" || status === "streaming"}
                   >
                     <PromptInputSelectTrigger className="h-7 gap-1.5 rounded-md px-2 text-xs font-normal">
                       {selectedBot && (

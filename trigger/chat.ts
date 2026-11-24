@@ -1,141 +1,68 @@
 import { google } from "@ai-sdk/google"
 import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
-import { stepCountIs } from "ai"
-import type { Sandbox } from "@daytona/sdk"
+import { stepCountIs, type ToolSet } from "ai"
 
 import { db } from "../db"
 import { getDaytonaClient } from "../lib/daytona"
 import {
-  createBashTool,
   createComputerUseTools,
   createHandoffTool,
-  createListFilesTool,
-  createReadFileTool,
-  createRecallMemoryTool,
-  createUpdateMemoryTool,
-  createWriteFileTool,
+  type Handoff,
 } from "./tools"
 
-function buildSystemPrompt(
-  bot?: {
-    id?: string
-    name: string
-    job: string
-    instructions?: string | null
-    sandboxId?: string | null
-  } | null,
-  groupContext?: {
-    isGroup: boolean
-    groupName?: string | null
-    teammates: Array<{
-      id: string
-      name: string
-      job: string
-      instructions?: string | null
-    }>
-  } | null
-) {
+export interface BotInfo {
+  id: string
+  name: string
+  job: string
+  instructions?: string | null
+  sandboxId?: string | null
+}
+
+export interface ChatInfo {
+  id: string
+  kind: "direct" | "group"
+  name?: string | null
+}
+
+function buildSystemPrompt({
+  bot,
+  chatInfo,
+  allBots = [],
+}: {
+  bot?: BotInfo | null
+  chatInfo?: ChatInfo | null
+  allBots?: BotInfo[]
+}) {
   const name = bot?.name || "AI Teammate"
   const job = bot?.job || "AI Assistant"
   const customInstructions =
     bot?.instructions?.trim() ||
     `Assist the user effectively in your role as ${job}.`
 
-  if (groupContext?.isGroup) {
-    const otherTeammates = groupContext.teammates.filter(
-      (t) => t.id !== bot?.id && t.name.toLowerCase() !== name.toLowerCase()
-    )
-    const teammatesList =
-      otherTeammates.length > 0
-        ? otherTeammates
-            .map(
-              (t) =>
-                `- **${t.name}** (Role: ${t.job})${
-                  t.instructions
-                    ? `\n  Specialty & Instructions: ${t.instructions.trim()}`
-                    : ""
-                }`
-            )
-            .join("\n")
-        : "None (you are the only bot member in this group)."
+  const isGroup = chatInfo?.kind === "group"
+
+  if (isGroup) {
+    const groupName = chatInfo?.name?.trim() || "Group Chat"
+    const teammates = allBots
+      .filter((b) => b.id !== bot?.id)
+      .map(
+        (t) =>
+          `- ${t.name} (id: ${t.id}): ${t.job}${
+            t.instructions ? `. Focus: ${t.instructions.slice(0, 150)}` : ""
+          }`
+      )
+      .join("\n")
 
     return [
-      `You are ${name}.`,
-      `Your job/role is: ${job}.`,
-      `Group Chat Environment:
-You are participating in a collaborative group chat named "${groupContext.groupName || "Team"}".
-In this group chat, you work alongside human user(s) and fellow AI teammates.
-You are currently the active responder representing: ${name} (${job}).
-The user has directed the current message to you (@${name}).`,
-      `CRITICAL IDENTITY & PERSONA RULES:
-- You are currently responding STRICTLY as ${name} (${job}).
-- You are NOT any other teammate. In particular:
-${otherTeammates.map((t) => `  - You are NOT ${t.name} (${t.job}).`).join("\n")}
-- The conversation history contains messages from other AI teammates in this group chat. DO NOT adopt their names, personas, greetings, or roles!
-- NEVER say "I am [other teammate name]" or "[other teammate name] here!".
-- NEVER introduce yourself as any teammate other than ${name}.
-- When asked "Who are you?", "What is your role?", or introducing yourself, always state clearly that you are ${name} (${job}) and describe your own expertise (${customInstructions}).
-- Speak only in your own voice and identity as ${name}.
-- Only switch persona if you execute a "handoff" tool call to another teammate in this exact turn.`,
-      `Your Specific Instructions & Expertise:
-${customInstructions}`,
-      `Your Teammates in this Group Chat:
-${teammatesList}`,
-      `Tools Available in this Group Chat:
-- handoff: Use this tool to hand off the conversation to another teammate in this group chat ONLY when the user's prompt specifically belongs to that teammate's domain specialty, or if the user explicitly addresses another teammate. DO NOT use handoff if your memory is empty or missing information—answer directly yourself.
-  - Parameters:
-    - targetBotName: The exact name of the teammate bot to hand off to.
-    - reason: A concise explanation of why this teammate is best suited.
-- recallMemory: Check your memory for past user preferences, favorite things, decisions, and context.
-- updateMemory: Save new user facts or preferences to your memory.
-- readFile: Read file contents from your sandbox filesystem.
-- writeFile: Create or update files in your sandbox filesystem.
-- listFiles: List files and directories in your sandbox filesystem.
-- bash: Execute bash shell commands in your sandbox environment.`,
-      `Long-Term Memory & Natural Recall:
-You have a persistent long-term memory system across all conversations.
-CRITICAL GOAL: You must remember things said by the user across conversations, including in group chats.
-- MANDATORY Tool Calling Rule (Save Immediately):
-  - Whenever the user shares ANY personal preference (e.g. favorite movie, food, drinks, anime, hobbies), personal background, project details, architecture decisions, or specific instructions:
-    YOU MUST ACTUALLY CALL "updateMemory" in this exact turn to save it.
-    DO NOT simply say in text "I have noted that down" or "I will remember that" without executing the tool call! A text promise does not save anything to memory.
-  - To save without losing existing memories:
-    First call "recallMemory" to inspect existing notes, combine them with the new information, and call "updateMemory" to save it immediately.
-- When to Recall Memory:
-  - Whenever the user or a teammate asks you about user preferences, favorite things (movies, food, music, hobbies), past decisions, or asks "do you know/remember...", "what is my favorite...":
-    1. Immediately call the "recallMemory" tool BEFORE answering.
-    2. Check the memory result. If the information exists, answer with it naturally and warmly (e.g. "From my memory, your favorite movie is Dune!").
-    3. If your memory is empty or does not contain the answer:
-       - DO NOT HAND OFF TO ANOTHER TEAMMATE.
-       - You MUST answer the user directly yourself.
-       - Respond politely and naturally (e.g. "I don't think you've told me your favorite movie yet! What's your favorite?", "My memory is drawing a blank on that—remind me?").
-- ABSOLUTE PROHIBITIONS (NEVER LEAK SYSTEM INTERNALS):
-  - NEVER output the word "MEMORY.md" under any circumstances.
-  - NEVER mention files, file paths, extensions, sandboxes, filesystems, tools, databases, or technical storage to the user.
-  - NEVER say "I consulted my persistent memory file", "my memory file is blank", "we haven't recorded that in the file yet", "in our 1:1 chat", or "since this is our first session".
-  - Always speak naturally like a human teammate using natural, everyday words like "my memory":
-    - Say: "From my memory...", "I recall you like...", "Let me check my memory...", "My memory is drawing a blank on that—remind me?"
-    - Treat your memory as natural personal recall, never as a computer file.`,
-      `Collaboration & Handoff Guidelines:
-1. **CRITICAL: NEVER HAND OFF FOR MISSING MEMORY**:
-   - If you check your memory and do not find the information asked (e.g. you don't know what movie or food the user likes), DO NOT call the handoff tool!
-   - Never hand off to another teammate assuming they might know or remember it.
-   - You MUST answer the user directly yourself, stating naturally that your memory is drawing a blank or asking them to tell/remind you.
-2. **Direct Addressing**: If the user explicitly mentions or addresses YOU (e.g. "@${name}"), you MUST handle the request and answer directly yourself. Do NOT hand off when you are addressed.
-3. **When to Handoff**:
-   - Only call the "handoff" tool if the user's request clearly belongs to another teammate's domain specialty (e.g. creative writing vs programming vs design vs DevOps) rather than yours, OR if the user explicitly addresses another teammate (e.g. "@Quill").
-   - NEVER hand off for general conversation, personal questions, questions about user preferences, or when your memory is empty.
-4. **Answer Directly**: If the request is general, related to user preferences, or in your domain, respond directly, thoroughly, and professionally as ${name}.
-5. **Fulfilling the Prompt Post-Handoff**:
-   - The "handoff" tool executes and completes the transfer.
-   - In the immediate next response step following the handoff tool execution, YOU MUST FULFILL THE USER'S PROMPT AS THAT TARGET TEAMMATE.
-   - Switch persona and speak as the target teammate.
-   - Respond directly in that teammate's voice according to that teammate's instructions and domain expertise.
-   - The target teammate also has access to their own memory via "recallMemory".
-   - Do NOT call the handoff tool a second time in the same turn.`,
+      `You are ${name}, an AI teammate. Your job: ${job}`,
+      `You are in a group chat called "${groupName}", together with the user and these other teammates:\n\n${teammates}`,
+      "The user addresses each message to one teammate, and this one is yours: either they picked you, or a teammate handed it to you. Earlier replies in this conversation may have been written by other teammates rather than by you. Use them as context, and do not present their work as your own.",
+      "Besides any other tools you have a handoff tool. Call it when a request clearly belongs to a teammate's job rather than yours, with their id and a short note on what is needed. That teammate then takes over and answers in your place, so write nothing more once you have called it. Do not hand off what you can do well yourself, or because a request is merely hard, and never pass a request back to a teammate who handed it to you. When nobody fits better, answer it yourself.",
+      `Your personal instructions:\n${customInstructions}`,
     ].join("\n\n")
   }
 
+  // Direct (1-on-1) chat
   const sandboxInfo = bot?.sandboxId
     ? `You are situated in an isolated Daytona cloud sandbox environment with ID: ${bot.sandboxId}.`
     : `You are situated in an isolated Daytona cloud sandbox environment.`
@@ -197,75 +124,77 @@ Guidelines:
   ].join("\n\n")
 }
 
-async function getSandboxForBot(
-  sandboxId?: string | null
-): Promise<Sandbox | null> {
-  if (!sandboxId) return null
-  try {
-    const daytona = getDaytonaClient()
-    const sandbox = await daytona.get(sandboxId)
-    if (sandbox.state !== "started") {
-      await sandbox.start()
-    }
-    return sandbox
-  } catch (error) {
-    console.error("Failed to retrieve sandbox for bot:", error)
-    return null
-  }
-}
-
 export const chatAgent = chat.agent({
   id: "chat-agent",
   storage: defaultStorage,
-  tools: async ({ chatId, clientData }) => {
-    const chatRecord = await db.query.chats.findFirst({
-      where: (chats, { eq }) => eq(chats.id, chatId),
-      with: {
-        members: {
-          with: {
-            bot: true,
+  tools: async ({ chatId, clientData }): Promise<ToolSet> => {
+    try {
+      const chatRecord = await db.query.chats.findFirst({
+        where: (chats, { eq }) => eq(chats.id, chatId),
+        with: {
+          members: {
+            with: {
+              bot: true,
+            },
           },
         },
-      },
-    })
-    const groupBots =
-      chatRecord?.members?.map((m) => m.bot).filter(Boolean) ?? []
-    const metadata = clientData as { selectedBotId?: string } | undefined
-    const selectedBot =
-      groupBots.find((b) => b.id === metadata?.selectedBotId) ??
-      groupBots[0] ??
-      null
-    const sandbox = await getSandboxForBot(selectedBot?.sandboxId)
+      })
 
-    return {
-      ...createComputerUseTools(sandbox),
-      handoff: createHandoffTool(groupBots),
-    }
-  },
-  run: async ({ messages, signal, streamText, chatId, clientData }) => {
-    let bot = null
-    let selectedBotId: string | undefined
+      if (!chatRecord) return {}
 
-    // 1. Priority: Latest user message's metadata.selectedBotId
-    if (messages && messages.length > 0) {
-      for (let i = messages.length - 1; i >= 0; i--) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const m = messages[i] as any
-        if (m.role === "user" && m.metadata?.selectedBotId) {
-          selectedBotId = m.metadata.selectedBotId
-          break
+      const allBots = chatRecord.members.map((m) => m.bot)
+      const metadata = clientData as { botId?: string } | undefined
+      const botId = metadata?.botId
+      const bot =
+        (botId ? allBots.find((b) => b.id === botId) : null) ??
+        allBots[0] ??
+        null
+
+      const held = new Set(bot ? [bot.id] : [])
+
+      if (chatRecord.kind === "group") {
+        return {
+          handoff: createHandoffTool((targetId) => {
+            const target = allBots.find(
+              (b) =>
+                b.id === targetId ||
+                b.name.toLowerCase().trim() === targetId.toLowerCase().trim()
+            )
+            if (!target) {
+              throw new Error("No teammate in this chat has that id.")
+            }
+            if (held.has(target.id)) {
+              throw new Error(
+                `${target.name} already had this request. Answer it yourself.`
+              )
+            }
+            held.add(target.id)
+            return { botId: target.id, name: target.name, job: target.job }
+          }),
         }
       }
-    }
 
-    // 2. Fallback to transport clientData
-    if (!selectedBotId) {
-      const metadata = clientData as { selectedBotId?: string } | undefined
-      selectedBotId = metadata?.selectedBotId
+      if (!bot?.sandboxId) {
+        return createComputerUseTools(null)
+      }
+      const daytona = getDaytonaClient()
+      const sandbox = await daytona.get(bot.sandboxId)
+      if (sandbox.state !== "started") {
+        await sandbox.start()
+      }
+      return createComputerUseTools(sandbox)
+    } catch (error) {
+      console.error("Failed to retrieve tools for chat:", error)
+      return {}
     }
+  },
+  run: async ({ messages, tools, signal, streamText, chatId, clientData }) => {
+    let bot: BotInfo | null = null
+    let allBots: BotInfo[] = []
+    let chatInfo: ChatInfo | null = null
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let chatRecord: any = null
+    const metadata = clientData as { botId?: string } | undefined
+    const botId = metadata?.botId
 
     try {
       chatRecord = await db.query.chats.findFirst({
@@ -279,40 +208,40 @@ export const chatAgent = chat.agent({
         },
       })
       if (chatRecord) {
-        if (chatRecord.kind === "group" && selectedBotId) {
+        chatInfo = {
+          id: chatRecord.id,
+          kind: chatRecord.kind,
+          name: chatRecord.name,
+        }
+
+        allBots = chatRecord.members.map((m) => m.bot)
+
+        if (chatRecord.kind === "group") {
           bot =
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            chatRecord.members.find((m: any) => m.botId === selectedBotId)
-              ?.bot ??
-            chatRecord.members[0]?.bot ??
+            (botId ? allBots.find((b) => b.id === botId) : null) ??
+            allBots[0] ??
             null
         } else {
-          bot = chatRecord.members[0]?.bot ?? null
+          bot = allBots[0] ?? null
         }
       }
     } catch (error) {
       console.error("Failed to fetch bot details for system prompt:", error)
     }
 
-    const isGroup = chatRecord?.kind === "group"
-    const allBots =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      chatRecord?.members?.map((m: any) => m.bot).filter(Boolean) ?? []
-    const groupContext = isGroup
-      ? {
-          isGroup: true,
-          groupName: chatRecord?.name,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          teammates: allBots.map((b: any) => ({
-            id: b.id,
-            name: b.name,
-            job: b.job,
-            instructions: b.instructions,
-          })),
-        }
-      : null
+    if (bot) {
+      chat.setUIMessageStreamOptions({
+        messageMetadata: () => ({
+          botId: bot.id,
+        }),
+      })
+    }
 
-    const system = buildSystemPrompt(bot, groupContext)
+    const system = buildSystemPrompt({
+      bot,
+      chatInfo,
+      allBots,
+    })
     const modelName =
       process.env.GOOGLE_GENERATIVE_AI_MODEL ||
       process.env.AI_MODEL ||
@@ -417,8 +346,30 @@ export const chatAgent = chat.agent({
     return streamText({
       model: google(modelName),
       system,
-      messages: modelMessages,
-      tools: runTools,
+      messages,
+      tools,
+      prepareStep: ({ steps }) => {
+        if (chatInfo?.kind !== "group") return undefined
+
+        const handoff = steps
+          .flatMap((step) => step.toolResults)
+          .findLast((result) => result.toolName === "handoff")
+
+        if (!handoff || !handoff.output) return undefined
+
+        const handoffOutput = handoff.output as Handoff
+        const current = allBots.find((b) => b.id === handoffOutput.botId)
+
+        if (!current) return undefined
+
+        return {
+          instructions: buildSystemPrompt({
+            bot: current,
+            chatInfo,
+            allBots,
+          }),
+        }
+      },
       abortSignal: signal,
       stopWhen: stepCountIs(15),
     })
