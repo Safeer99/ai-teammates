@@ -191,10 +191,9 @@ function ChatContent({
     if (!text) return
 
     sendMessage(
-      { text },
-      isGroup && selectedBotId
-        ? { metadata: { botId: selectedBotId } }
-        : undefined
+      isGroup && selectedBot
+        ? { text, metadata: { botId: selectedBot.id } }
+        : { text }
     )
     setInput("")
   }

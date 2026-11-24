@@ -10,6 +10,7 @@ import {
 } from "@/components/ai-elements/message"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { ToolCall, type GenericToolPart } from "@/components/tool-call"
+import { Badge } from "@/components/ui/badge"
 import type { ChatBotItem } from "@/components/chat-view"
 
 export interface ChatMessageProps {
@@ -108,6 +109,12 @@ export function ChatMessage({
   bots = [],
 }: ChatMessageProps) {
   const isAssistant = message.role === "assistant"
+  const targetBotId = (message.metadata as { botId?: string } | undefined)
+    ?.botId
+  const targetBot =
+    isGroup && !isAssistant && targetBotId
+      ? bots.find((b) => b.id === targetBotId)
+      : undefined
 
   const sections = React.useMemo(() => {
     if (!isGroup || !isAssistant) return null
@@ -172,11 +179,36 @@ export function ChatMessage({
   return (
     <Message from={message.role}>
       <MessageContent>
-        {message.parts.map((part, partIdx) =>
-          renderMessagePart(
-            part,
-            `${message.id}-${messageIndex}-${partIdx}`,
-            bots
+        {targetBot ? (
+          <div className="flex items-start gap-2">
+            <Badge
+              variant="outline"
+              className="shrink-0 gap-1.5 bg-background/30 pr-2 pl-1"
+            >
+              <ChatAvatar
+                seed={targetBot.avatar || targetBot.id}
+                alt={targetBot.name}
+                className="size-4"
+              />
+              <span>{targetBot.name}</span>
+            </Badge>
+            <div className="flex min-w-0 flex-col gap-2">
+              {message.parts.map((part, partIdx) =>
+                renderMessagePart(
+                  part,
+                  `${message.id}-${messageIndex}-${partIdx}`,
+                  bots
+                )
+              )}
+            </div>
+          </div>
+        ) : (
+          message.parts.map((part, partIdx) =>
+            renderMessagePart(
+              part,
+              `${message.id}-${messageIndex}-${partIdx}`,
+              bots
+            )
           )
         )}
       </MessageContent>
