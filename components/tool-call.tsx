@@ -57,6 +57,8 @@ export const TOOL_TITLES: Record<string, string> = {
   readFile: "Read File",
   writeFile: "Write File",
   listFiles: "List Files",
+  recallMemory: "Recall Memory",
+  updateMemory: "Update Memory",
   mouseClick: "Mouse Click",
   mouseMove: "Mouse Move",
   mouseScroll: "Mouse Scroll",
@@ -230,12 +232,7 @@ export function ToolCallPart({ part }: { part: GenericToolPart }) {
   const title = TOOL_TITLES[toolName] ?? toolName
 
   return (
-    <Tool
-      defaultOpen={
-        part.state === "input-available" || part.state === "output-error"
-      }
-      className="my-2 bg-card"
-    >
+    <Tool defaultOpen={false} className="my-2 bg-card">
       <ToolHeader
         type={part.type as "dynamic-tool"}
         state={part.state}

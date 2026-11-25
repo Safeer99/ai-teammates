@@ -2,6 +2,20 @@ import type { Sandbox } from "@daytona/sdk"
 import { tool } from "ai"
 import { z } from "zod"
 
+export type SandboxSource =
+  | Sandbox
+  | (() => Promise<Sandbox | null>)
+  | null
+  | undefined
+
+async function resolveSandbox(source: SandboxSource): Promise<Sandbox | null> {
+  if (!source) return null
+  if (typeof source === "function") {
+    return source()
+  }
+  return source
+}
+
 export async function ensureSandboxReady(sandbox: Sandbox) {
   if (sandbox.state !== "started") {
     await sandbox.start()
@@ -53,13 +67,14 @@ export const createBashTool = (sandbox?: Sandbox | null) =>
     },
   })
 
-export const createReadFileTool = (sandbox?: Sandbox | null) =>
+export const createReadFileTool = (sandboxSource?: SandboxSource) =>
   tool({
     description: "Read the contents of a file from the sandbox filesystem.",
     inputSchema: z.object({
       path: z.string().describe("Path to the file to read in the sandbox"),
     }),
     execute: async ({ path }) => {
+      const sandbox = await resolveSandbox(sandboxSource)
       if (!sandbox) return { error: "No active sandbox environment available." }
       try {
         await ensureSandboxReady(sandbox)
@@ -78,7 +93,7 @@ export const createReadFileTool = (sandbox?: Sandbox | null) =>
     },
   })
 
-export const createWriteFileTool = (sandbox?: Sandbox | null) =>
+export const createWriteFileTool = (sandboxSource?: SandboxSource) =>
   tool({
     description:
       "Create or overwrite a file with the given content in the sandbox filesystem.",
@@ -87,6 +102,7 @@ export const createWriteFileTool = (sandbox?: Sandbox | null) =>
       content: z.string().describe("The text content to write into the file"),
     }),
     execute: async ({ path, content }) => {
+      const sandbox = await resolveSandbox(sandboxSource)
       if (!sandbox) return { error: "No active sandbox environment available." }
       try {
         await ensureSandboxReady(sandbox)
@@ -409,12 +425,88 @@ export const createShowScreenTool = (sandbox?: Sandbox | null) =>
     },
   })
 
+export const createRecallMemoryTool = (sandboxSource?: SandboxSource) =>
+  tool({
+    description:
+      "Recall your persistent long-term memory from MEMORY.md in your sandbox. Use this to remember facts, user preferences, personal details, project context, and past conversations.",
+    inputSchema: z.object({}),
+    execute: async () => {
+      const sandbox = await resolveSandbox(sandboxSource)
+      if (!sandbox) return { error: "No active sandbox environment available." }
+      try {
+        await ensureSandboxReady(sandbox)
+        const buffer = await sandbox.fs.downloadFile("MEMORY.md")
+        return {
+          memory: buffer.toString("utf8"),
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to recall memory"
+        return { error: message }
+      }
+    },
+  })
+
+export const createUpdateMemoryTool = (sandboxSource?: SandboxSource) =>
+  tool({
+    description:
+      "Save or update your persistent long-term memory in MEMORY.md. Call this whenever the user shares preferences, likes/dislikes, personal details, project context, or decisions, or asks you to remember something.",
+    inputSchema: z.object({
+      content: z
+        .string()
+        .min(1)
+        .describe(
+          "The memory entry in concise markdown (e.g. '- Favorite movie: Dune')."
+        ),
+      mode: z
+        .enum(["append", "replace"])
+        .default("append")
+        .describe(
+          "Use 'append' to add new information to existing memory, or 'replace' to overwrite the entire MEMORY.md."
+        ),
+    }),
+    execute: async ({ content, mode }) => {
+      const sandbox = await resolveSandbox(sandboxSource)
+      if (!sandbox) return { error: "No active sandbox environment available." }
+      try {
+        await ensureSandboxReady(sandbox)
+        let nextContent: string
+        if (mode === "append") {
+          let existing = ""
+          try {
+            const buffer = await sandbox.fs.downloadFile("MEMORY.md")
+            existing = buffer.toString("utf8")
+          } catch {
+            existing = ""
+          }
+          nextContent = existing.trim()
+            ? `${existing.trimEnd()}\n${content.trim()}\n`
+            : `${content.trim()}\n`
+        } else {
+          nextContent = `${content.trimEnd()}\n`
+        }
+        await sandbox.fs.uploadFile(Buffer.from(nextContent, "utf8"), "MEMORY.md")
+        return {
+          success: true,
+          mode,
+          bytesWritten: Buffer.byteLength(nextContent, "utf8"),
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to update memory"
+        return { error: message }
+      }
+    },
+  })
+
 export function createComputerUseTools(sandbox?: Sandbox | null) {
   return {
     bash: createBashTool(sandbox),
     readFile: createReadFileTool(sandbox),
     writeFile: createWriteFileTool(sandbox),
     listFiles: createListFilesTool(sandbox),
+    recallMemory: createRecallMemoryTool(sandbox),
+    updateMemory: createUpdateMemoryTool(sandbox),
     mouseClick: createMouseClickTool(sandbox),
     mouseMove: createMouseMoveTool(sandbox),
     mouseScroll: createMouseScrollTool(sandbox),

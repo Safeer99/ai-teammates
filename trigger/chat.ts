@@ -1,3 +1,4 @@
+import type { Sandbox } from "@daytona/sdk"
 import { google } from "@ai-sdk/google"
 import { chat, defaultStorage } from "@trigger.dev/sdk/ai"
 import { stepCountIs, type ToolSet } from "ai"
@@ -7,6 +8,9 @@ import { getDaytonaClient } from "../lib/daytona"
 import {
   createComputerUseTools,
   createHandoffTool,
+  createRecallMemoryTool,
+  createUpdateMemoryTool,
+  ensureSandboxReady,
   type Handoff,
 } from "./tools"
 
@@ -58,6 +62,10 @@ function buildSystemPrompt({
       `You are in a group chat called "${groupName}", together with the user and these other teammates:\n\n${teammates}`,
       "The user addresses each message to one teammate, and this one is yours: either they picked you, or a teammate handed it to you. Earlier replies in this conversation may have been written by other teammates rather than by you. Use them as context, and do not present their work as your own.",
       "Besides any other tools you have a handoff tool. Call it when a request clearly belongs to a teammate's job rather than yours, with their id and a short note on what is needed. That teammate then takes over and answers in your place, so write nothing more once you have called it. Do not hand off what you can do well yourself, or because a request is merely hard, and never pass a request back to a teammate who handed it to you. When nobody fits better, answer it yourself.",
+      `Memory:
+You have \`recallMemory\` and \`updateMemory\` tools connected to your personal persistent memory ("MEMORY.md"), which is shared with your private 1:1 chats.
+- Always check memory: Whenever the user asks about something you might know from a private 1:1 chat (such as their preferences, favorite things, personal details, past discussions, or prior decisions) or asks what you remember, call \`recallMemory\` BEFORE answering or handing off.
+- Update memory: When the user shares important new preferences, personal details, facts, or decisions, call \`updateMemory\` to save them.`,
       `Your personal instructions:\n${customInstructions}`,
     ].join("\n\n")
   }
@@ -84,9 +92,11 @@ ${sandboxInfo}`,
     `Computer Use & Tools:
 You have access to a full computer use toolkit connected to your Daytona sandbox environment:
 - bash: Execute bash shell commands, inspect system info, run scripts, install tools.
-- readFile: Read file contents from the sandbox filesystem (including "MEMORY.md").
-- writeFile: Create or update files in the sandbox filesystem (including "MEMORY.md").
+- readFile: Read file contents from the sandbox filesystem.
+- writeFile: Create or update files in the sandbox filesystem.
 - listFiles: Explore directory structures and files in the sandbox.
+- recallMemory: Recall your persistent long-term memory ("MEMORY.md") shared across 1:1 and group chats.
+- updateMemory: Save or update persistent long-term memories in "MEMORY.md".
 - mouseClick: Click anywhere on the desktop screen (left, right, or double-click).
 - mouseMove: Move the cursor to any coordinates on the screen.
 - mouseScroll: Scroll up, down, left, or right at specific coordinates.
@@ -98,7 +108,12 @@ You have access to a full computer use toolkit connected to your Daytona sandbox
 Guidelines:
 - When asked to perform desktop tasks or interact with GUI applications, use viewScreen first if you need to know the visual state or coordinates.
 - Use showScreen whenever the user explicitly requests to see the screen or visual output.
-- When performing terminal or code operations, use bash and filesystem tools as appropriate.`,
+- When performing terminal or code operations, use bash and filesystem tools as appropriate.
+
+Memory:
+Your persistent long-term memory ("MEMORY.md") is shared across both this private 1:1 chat and any group chats you participate in.
+- Reference memory: Call \`recallMemory\` at the start of a conversation or whenever past context, user preferences, personal details, project facts, or prior decisions might be relevant.
+- Proactively write memory: Whenever the user shares any personal detail, preference, like or dislike (e.g. favorite movie, hobbies, tools, style), goal, project fact, or decision — even in casual conversation and even if they do not explicitly ask you to remember it — immediately call \`updateMemory\` (with \`mode: "append"\`) to save it. Only use \`mode: "replace"\` if you need to reorganize or deduplicate after calling \`recallMemory\`.`,
   ].join("\n\n")
 }
 
@@ -131,7 +146,24 @@ export const chatAgent = chat.agent({
       const held = new Set(bot ? [bot.id] : [])
 
       if (chatRecord.kind === "group") {
+        let currentBot = bot
+        const sandboxCache = new Map<string, Sandbox>()
+
+        const getCurrentSandbox = async (): Promise<Sandbox | null> => {
+          if (!currentBot?.sandboxId) return null
+          let sandbox = sandboxCache.get(currentBot.sandboxId)
+          if (!sandbox) {
+            const daytona = getDaytonaClient()
+            sandbox = await daytona.get(currentBot.sandboxId)
+            sandboxCache.set(currentBot.sandboxId, sandbox)
+          }
+          await ensureSandboxReady(sandbox)
+          return sandbox
+        }
+
         return {
+          recallMemory: createRecallMemoryTool(getCurrentSandbox),
+          updateMemory: createUpdateMemoryTool(getCurrentSandbox),
           handoff: createHandoffTool((targetId) => {
             const target = allBots.find(
               (b) =>
@@ -147,6 +179,7 @@ export const chatAgent = chat.agent({
               )
             }
             held.add(target.id)
+            currentBot = target
             return { botId: target.id, name: target.name, job: target.job }
           }),
         }
