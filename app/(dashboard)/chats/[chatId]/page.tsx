@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation"
 import { auth } from "@clerk/nextjs/server"
 
+import { getUserBots } from "@/queries/bots"
 import { getChat } from "@/queries/chats"
 import { ChatHeader } from "@/components/chat-header"
 import { ChatView } from "@/components/chat-view"
@@ -23,7 +24,7 @@ export default async function Page({ params }: PageProps) {
   await auth.protect()
 
   const { chatId } = await params
-  const chat = await getChat(chatId)
+  const [chat, userBots] = await Promise.all([getChat(chatId), getUserBots()])
 
   if (!chat) {
     notFound()
@@ -46,7 +47,7 @@ export default async function Page({ params }: PageProps) {
         className="h-full min-w-0 overflow-hidden"
       >
         <div className="flex h-full w-full min-w-0 flex-1 flex-col overflow-hidden">
-          <ChatHeader chat={chat} />
+          <ChatHeader chat={chat} allBots={userBots} />
           <div className="flex flex-1 min-h-0 min-w-0 flex-col overflow-hidden">
             <ChatView
               chatId={chatId}

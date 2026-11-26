@@ -5,8 +5,18 @@ import { useRouter } from "next/navigation"
 import { useForm, useWatch } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { Loader2Icon } from "lucide-react"
+import { Loader2Icon, Trash2Icon } from "lucide-react"
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   Dialog,
   DialogContent,
@@ -21,8 +31,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ChatAvatar } from "@/components/chat-avatar"
-import { createGroupChat } from "@/action/chat"
+import {
+  createGroupChat,
+  deleteGroupChat,
+  updateGroupChat,
+} from "@/action/chat"
 import { toast } from "@/components/ui/toast"
+import { cn } from "@/lib/utils"
 
 export const groupChatFormSchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -37,16 +52,24 @@ export interface GroupChatBotItem {
   avatar?: string | null
 }
 
+export interface GroupChatData {
+  id: string
+  name?: string | null
+  botIds: string[]
+}
+
 export interface GroupChatDialogProps {
+  chat?: GroupChatData | null
   open?: boolean
   onOpenChange?: (open: boolean) => void
   trigger?: React.ReactNode
   children?: React.ReactNode
   bots?: GroupChatBotItem[]
-  onSuccess?: (chatId: string) => void
+  onSuccess?: (chatId?: string) => void
 }
 
 export function GroupChatDialog({
+  chat,
   open: controlledOpen,
   onOpenChange: setControlledOpen,
   trigger,
@@ -55,17 +78,14 @@ export function GroupChatDialog({
   onSuccess,
 }: GroupChatDialogProps) {
   const router = useRouter()
+  const isEdit = Boolean(chat?.id)
   const [internalOpen, setInternalOpen] = React.useState(false)
+  const [serverError, setServerError] = React.useState<string | null>(null)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = React.useState(false)
+  const [isDeleting, setIsDeleting] = React.useState(false)
 
   const isControlled = controlledOpen !== undefined
   const open = isControlled ? controlledOpen : internalOpen
-  const onOpenChange = (newOpen: boolean) => {
-    if (isControlled) {
-      setControlledOpen?.(newOpen)
-    } else {
-      setInternalOpen(newOpen)
-    }
-  }
 
   const {
     register,
@@ -77,54 +97,135 @@ export function GroupChatDialog({
   } = useForm<GroupChatFormValues>({
     resolver: zodResolver(groupChatFormSchema),
     defaultValues: {
-      name: "",
-      botIds: [],
+      name: chat?.name ?? "",
+      botIds: chat?.botIds ?? [],
     },
   })
 
   const selectedBotIds = useWatch({ control, name: "botIds" }) || []
 
   React.useEffect(() => {
-    if (!open) {
+    if (open) {
       reset({
-        name: "",
-        botIds: [],
+        name: chat?.name ?? "",
+        botIds: chat?.botIds ?? [],
       })
     }
-  }, [open, reset])
+  }, [open, chat, reset])
+
+  const onOpenChange = (newOpen: boolean) => {
+    setServerError(null)
+    setConfirmDeleteOpen(false)
+    if (!newOpen) {
+      reset({
+        name: chat?.name ?? "",
+        botIds: chat?.botIds ?? [],
+      })
+    }
+    if (isControlled) {
+      setControlledOpen?.(newOpen)
+    } else {
+      setInternalOpen(newOpen)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!chat?.id) return
+    try {
+      setIsDeleting(true)
+      await deleteGroupChat(chat.id)
+
+      toast.add({
+        title: "Group chat deleted",
+        description: `${chat.name || "Group chat"} was successfully deleted.`,
+        type: "success",
+      })
+
+      setConfirmDeleteOpen(false)
+      onOpenChange(false)
+      router.push("/")
+      router.refresh()
+      onSuccess?.()
+    } catch (error) {
+      console.error("Failed to delete group chat:", error)
+      const message =
+        error instanceof Error ? error.message : "Failed to delete group chat"
+      toast.add({
+        title: "Failed to delete group chat",
+        description: message,
+        type: "error",
+      })
+    } finally {
+      setIsDeleting(false)
+    }
+  }
 
   const onSubmit = async (values: GroupChatFormValues) => {
     try {
-      const result = await createGroupChat(values)
-      toast.add({
-        title: "Group chat created",
-        description: `Successfully created "${values.name}".`,
-      })
-      onOpenChange(false)
-      onSuccess?.(result.chatId)
-      router.push(`/chats/${result.chatId}`)
+      setServerError(null)
+      if (isEdit && chat) {
+        await updateGroupChat({
+          chatId: chat.id,
+          name: values.name,
+          botIds: values.botIds,
+        })
+        toast.add({
+          title: "Group chat updated",
+          description: `Successfully updated "${values.name}".`,
+          type: "success",
+        })
+        onOpenChange(false)
+        router.refresh()
+        onSuccess?.(chat.id)
+      } else {
+        const result = await createGroupChat(values)
+        toast.add({
+          title: "Group chat created",
+          description: `Successfully created "${values.name}".`,
+          type: "success",
+        })
+        onOpenChange(false)
+        onSuccess?.(result.chatId)
+        router.push(`/chats/${result.chatId}`)
+      }
     } catch (error) {
-      console.error("Failed to create group chat:", error)
+      console.error(
+        isEdit
+          ? "Failed to update group chat:"
+          : "Failed to create group chat:",
+        error
+      )
+      const message =
+        error instanceof Error
+          ? error.message
+          : "An unexpected error occurred."
+      setServerError(message)
       toast.add({
-        title: "Failed to create group chat",
-        description:
-          error instanceof Error
-            ? error.message
-            : "An unexpected error occurred.",
+        title: isEdit
+          ? "Failed to update group chat"
+          : "Failed to create group chat",
+        description: message,
+        type: "error",
       })
     }
   }
 
+  const triggerElement = trigger || children
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {trigger ? <DialogTrigger render={trigger as React.ReactElement} /> : children}
+      {triggerElement && (
+        <DialogTrigger render={triggerElement as React.ReactElement} />
+      )}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-lg font-semibold">
-            New group chat
+            {isEdit ? "Edit group chat" : "New group chat"}
           </DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
-            Name the group and pick which bots are in it.
+            {isEdit
+              ? "Update the group name, members, or delete this group chat."
+              : "Name the group and pick which bots are in it."}
           </DialogDescription>
         </DialogHeader>
 
@@ -195,24 +296,94 @@ export function GroupChatDialog({
             )}
           </div>
 
-          <DialogFooter className="flex items-center justify-end gap-2 pt-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={isSubmitting}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting && (
-                <Loader2Icon className="mr-2 size-4 animate-spin" />
-              )}
-              Create group
-            </Button>
+          {serverError && (
+            <div className="rounded-md bg-destructive/10 p-2 text-xs text-destructive">
+              {serverError}
+            </div>
+          )}
+
+          <DialogFooter
+            className={cn(
+              "-mx-6 mt-2 -mb-6 flex flex-row items-center border-t border-border/50 bg-muted/20 px-6 py-3",
+              isEdit
+                ? "justify-between sm:justify-between"
+                : "justify-end sm:justify-end"
+            )}
+          >
+            {isEdit && (
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => setConfirmDeleteOpen(true)}
+                disabled={isSubmitting || isDeleting}
+              >
+                <Trash2Icon className="mr-1.5 size-4" />
+                Delete
+              </Button>
+            )}
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={isSubmitting || isDeleting}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSubmitting || isDeleting}>
+                {isSubmitting ? (
+                  <>
+                    <Loader2Icon className="mr-1.5 size-4 animate-spin" />
+                    {isEdit ? "Updating..." : "Creating..."}
+                  </>
+                ) : isEdit ? (
+                  "Update group"
+                ) : (
+                  "Create group"
+                )}
+              </Button>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>
+
+      {isEdit && chat && (
+        <AlertDialog
+          open={confirmDeleteOpen}
+          onOpenChange={setConfirmDeleteOpen}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                Delete {chat.name || "group chat"}?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete this group chat and its
+                conversation history. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={handleDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2Icon className="mr-1.5 size-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete group"
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </Dialog>
   )
 }
