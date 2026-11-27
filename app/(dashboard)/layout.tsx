@@ -1,6 +1,6 @@
 import { cookies } from "next/headers"
 
-import { AppSidebar } from "@/components/app-sidebar"
+import { AppSidebar } from "@/components/sidebar"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { getUserBots, getUserChats } from "@/queries/bots"
 
