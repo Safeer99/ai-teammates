@@ -2,6 +2,11 @@
 
 import { auth } from "@clerk/nextjs/server"
 import { db } from "@/db"
+import {
+  PAID_PLAN_SLUG,
+  PLAN_REQUIRED_ERROR_CODE,
+  PLAN_REQUIRED_MESSAGE,
+} from "@/lib/billing"
 import { getDaytonaClient } from "@/lib/daytona"
 
 export interface VncUrlResult {
@@ -9,13 +14,24 @@ export interface VncUrlResult {
   botName: string
   sandboxId?: string | null
   error?: string | null
+  code?: string | null
 }
 
 export async function getChatVncUrl(chatId: string): Promise<VncUrlResult> {
-  const { isAuthenticated, userId } = await auth()
+  const { isAuthenticated, userId, has } = await auth()
 
   if (!isAuthenticated || !userId) {
     throw new Error("Unauthorized")
+  }
+
+  if (!has({ plan: PAID_PLAN_SLUG })) {
+    return {
+      url: null,
+      botName: "Assistant",
+      sandboxId: null,
+      error: PLAN_REQUIRED_MESSAGE,
+      code: PLAN_REQUIRED_ERROR_CODE,
+    }
   }
 
   const chat = await db.query.chats.findFirst({

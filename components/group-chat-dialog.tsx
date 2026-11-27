@@ -37,6 +37,8 @@ import {
   updateGroupChat,
 } from "@/action/chat"
 import { toast } from "@/components/ui/toast"
+import { useBillingGate } from "@/hooks/use-billing-toast"
+import { isPlanRequiredError } from "@/lib/billing"
 import { cn } from "@/lib/utils"
 
 export const groupChatFormSchema = z.object({
@@ -78,6 +80,7 @@ export function GroupChatDialog({
   onSuccess,
 }: GroupChatDialogProps) {
   const router = useRouter()
+  const { ensurePaidPlan, showUpgradeToast } = useBillingGate()
   const isEdit = Boolean(chat?.id)
   const [internalOpen, setInternalOpen] = React.useState(false)
   const [serverError, setServerError] = React.useState<string | null>(null)
@@ -114,6 +117,13 @@ export function GroupChatDialog({
   }, [open, chat, reset])
 
   const onOpenChange = (newOpen: boolean) => {
+    if (
+      newOpen &&
+      !isEdit &&
+      !ensurePaidPlan("A paid plan is required to create group chats with bots.")
+    ) {
+      return
+    }
     setServerError(null)
     setConfirmDeleteOpen(false)
     if (!newOpen) {
@@ -200,13 +210,19 @@ export function GroupChatDialog({
           ? error.message
           : "An unexpected error occurred."
       setServerError(message)
-      toast.add({
-        title: isEdit
-          ? "Failed to update group chat"
-          : "Failed to create group chat",
-        description: message,
-        type: "error",
-      })
+      if (isPlanRequiredError(error)) {
+        showUpgradeToast(
+          "A paid plan is required to create group chats with bots."
+        )
+      } else {
+        toast.add({
+          title: isEdit
+            ? "Failed to update group chat"
+            : "Failed to create group chat",
+          description: message,
+          type: "error",
+        })
+      }
     }
   }
 

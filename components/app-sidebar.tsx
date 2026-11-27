@@ -42,6 +42,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar"
 import type { UserBot, UserChat } from "@/queries/bots"
+import { useBillingGate } from "@/hooks/use-billing-toast"
 
 export interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   chats?: UserChat[]
@@ -56,6 +57,7 @@ export function AppSidebar({
   const router = useRouter()
   const pathname = usePathname()
   const params = useParams()
+  const { ensurePaidPlan } = useBillingGate()
   const [botDialogOpen, setBotDialogOpen] = React.useState(false)
   const [groupDialogOpen, setGroupDialogOpen] = React.useState(false)
   const [commandOpen, setCommandOpen] = React.useState(false)
@@ -106,11 +108,31 @@ export function AppSidebar({
               className="w-48"
             >
               <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => setBotDialogOpen(true)}>
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (
+                      ensurePaidPlan(
+                        "A paid plan is required to create bots and sandboxes."
+                      )
+                    ) {
+                      setBotDialogOpen(true)
+                    }
+                  }}
+                >
                   <PlusIcon />
                   <span>Create new bot</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setGroupDialogOpen(true)}>
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (
+                      ensurePaidPlan(
+                        "A paid plan is required to create group chats with bots."
+                      )
+                    ) {
+                      setGroupDialogOpen(true)
+                    }
+                  }}
+                >
                   <UsersIcon />
                   <span>Create group chat</span>
                 </DropdownMenuItem>

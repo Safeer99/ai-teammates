@@ -6,6 +6,7 @@ import { and, eq, inArray } from "drizzle-orm"
 import { nanoid } from "nanoid"
 
 import { db } from "@/db"
+import { requireAuthAndPaidPlan } from "@/lib/billing-server"
 import { getDaytonaClient } from "@/lib/daytona"
 import {
   bots,
@@ -24,11 +25,7 @@ export type CreateBotInput = {
 }
 
 export async function createBot(data: CreateBotInput) {
-  const { isAuthenticated, userId } = await auth()
-
-  if (!isAuthenticated || !userId) {
-    throw new Error("Unauthorized")
-  }
+  const { userId } = await requireAuthAndPaidPlan()
 
   const daytona = getDaytonaClient()
   const sandbox = await daytona.create()

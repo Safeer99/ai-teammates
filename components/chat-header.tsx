@@ -12,6 +12,7 @@ import {
 } from "@/components/group-chat-dialog"
 import { Button } from "@/components/ui/button"
 import { useParentGroup } from "@/components/ui/resizable"
+import { useBillingGate } from "@/hooks/use-billing-toast"
 import type { ChatWithMembers } from "@/queries/chats"
 
 export interface ChatHeaderProps {
@@ -21,6 +22,7 @@ export interface ChatHeaderProps {
 
 export function ChatHeader({ chat, allBots = [] }: ChatHeaderProps) {
   const group = useParentGroup()
+  const { ensurePaidPlan } = useBillingGate()
   const [isOpen, setIsOpen] = React.useState(false)
   const lastSizeRef = React.useRef(35)
 
@@ -60,6 +62,11 @@ export function ChatHeader({ chat, allBots = [] }: ChatHeaderProps) {
       lastSizeRef.current = currentSize
       group.setLayout({ "chat-main": 100, "chat-desktop": 0 })
     } else {
+      if (
+        !ensurePaidPlan("A paid plan is required to connect to bot sandboxes.")
+      ) {
+        return
+      }
       const nextSize = lastSizeRef.current > 0 ? lastSizeRef.current : 35
       group.setLayout({
         "chat-main": 100 - nextSize,

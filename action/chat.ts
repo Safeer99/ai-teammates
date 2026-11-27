@@ -9,6 +9,7 @@ import { revalidatePath } from "next/cache"
 import { z } from "zod"
 
 import { db } from "@/db"
+import { requireAuthAndPaidPlan } from "@/lib/billing-server"
 import {
   chats,
   chatMembers,
@@ -30,10 +31,7 @@ const createGroupChatSchema = z.object({
 export type CreateGroupChatInput = z.infer<typeof createGroupChatSchema>
 
 export async function createGroupChat(data: CreateGroupChatInput) {
-  const { isAuthenticated, userId } = await clerkAuth()
-  if (!isAuthenticated || !userId) {
-    throw new Error("Unauthorized")
-  }
+  const { userId } = await requireAuthAndPaidPlan()
 
   const validated = createGroupChatSchema.parse(data)
 
@@ -170,10 +168,7 @@ export async function startChatSession(params: {
   chatId: string
   clientData?: unknown
 }) {
-  const { isAuthenticated, userId } = await clerkAuth()
-  if (!isAuthenticated || !userId) {
-    throw new Error("Unauthorized")
-  }
+  await requireAuthAndPaidPlan()
 
   const existingChat = await getChat(params.chatId)
   if (!existingChat) {
@@ -184,10 +179,7 @@ export async function startChatSession(params: {
 }
 
 export async function mintChatAccessToken(chatId: string) {
-  const { isAuthenticated, userId } = await clerkAuth()
-  if (!isAuthenticated || !userId) {
-    throw new Error("Unauthorized")
-  }
+  await requireAuthAndPaidPlan()
 
   const existingChat = await getChat(chatId)
   if (!existingChat) {

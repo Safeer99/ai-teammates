@@ -11,6 +11,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
+import { useBillingGate } from "@/hooks/use-billing-toast"
+import { PLAN_REQUIRED_ERROR_CODE, PLAN_REQUIRED_MESSAGE } from "@/lib/billing"
 import { cn } from "@/lib/utils"
 
 export interface VncPreviewProps {
@@ -24,6 +26,8 @@ export function VncPreview({
   botName = "Assistant",
   className,
 }: VncPreviewProps) {
+  const { isLoaded, hasPaidPlan, ensurePaidPlan, showUpgradeToast } =
+    useBillingGate()
   const [vncUrl, setVncUrl] = React.useState<string | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
   const [isRefreshing, setIsRefreshing] = React.useState(false)
@@ -34,6 +38,8 @@ export function VncPreview({
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null)
 
   React.useEffect(() => {
+    if (!isLoaded || !hasPaidPlan) return
+
     let isCancelled = false
 
     getChatVncUrl(chatId)
@@ -63,14 +69,22 @@ export function VncPreview({
     return () => {
       isCancelled = true
     }
-  }, [chatId])
+  }, [chatId, isLoaded, hasPaidPlan])
 
   const handleRefresh = React.useCallback(async () => {
+    if (
+      !ensurePaidPlan("A paid plan is required to connect to bot sandboxes.")
+    ) {
+      return
+    }
     setIsRefreshing(true)
     setError(null)
     try {
       const result = await getChatVncUrl(chatId)
-      if (result.error) {
+      if (result.code === PLAN_REQUIRED_ERROR_CODE) {
+        showUpgradeToast(result.error || undefined)
+        setError(result.error || PLAN_REQUIRED_MESSAGE)
+      } else if (result.error) {
         setError(result.error)
       } else if (result.url) {
         setVncUrl(result.url)
@@ -88,7 +102,7 @@ export function VncPreview({
     } finally {
       setIsRefreshing(false)
     }
-  }, [chatId])
+  }, [chatId, ensurePaidPlan, showUpgradeToast])
 
   const handleOpenChange = React.useCallback(
     (open: boolean, details?: { reason?: string }) => {
@@ -102,6 +116,9 @@ export function VncPreview({
   )
 
   const displayName = resolvedBotName || botName || "Assistant"
+  const effectiveIsLoading = !isLoaded || (hasPaidPlan && isLoading)
+  const effectiveError =
+    isLoaded && !hasPaidPlan ? PLAN_REQUIRED_MESSAGE : error
 
   return (
     <div
@@ -130,17 +147,17 @@ export function VncPreview({
 
       {/* Main Preview Container - Aligned to top */}
       <div className="flex flex-1 flex-col items-center justify-start px-2 pt-2 pb-6">
-        {isLoading && !vncUrl ? (
+        {effectiveIsLoading && !vncUrl ? (
           <div className="flex aspect-4/3 w-full max-w-sm flex-col items-center justify-center gap-3 rounded-2xl border border-border/40 bg-muted/20 p-6 text-center shadow-inner">
             <Spinner className="size-6 text-muted-foreground" />
             <span className="text-xs text-muted-foreground">
               Connecting to {displayName}&apos;s screen...
             </span>
           </div>
-        ) : error && !vncUrl ? (
+        ) : effectiveError && !vncUrl ? (
           <div className="flex aspect-4/3 w-full max-w-sm flex-col items-center justify-center gap-3 rounded-2xl border border-destructive/20 bg-destructive/5 p-6 text-center shadow-inner">
             <MonitorIcon className="size-8 text-muted-foreground/60" />
-            <p className="line-clamp-2 text-xs text-muted-foreground">{error}</p>
+            <p className="line-clamp-2 text-xs text-muted-foreground">{effectiveError}</p>
             <Button
               type="button"
               variant="outline"

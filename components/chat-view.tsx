@@ -40,6 +40,8 @@ import { ChatAvatar } from "@/components/chat-avatar"
 import { ChatMessage } from "@/components/chat-message"
 import { GroupChatAvatar } from "@/components/group-chat-avatar"
 import { Spinner } from "@/components/ui/spinner"
+import { useBillingGate } from "@/hooks/use-billing-toast"
+import { isPlanRequiredError } from "@/lib/billing"
 import { cn } from "@/lib/utils"
 import type { chatAgent } from "@/trigger/chat"
 
@@ -145,6 +147,7 @@ function ChatContent({
   transport,
 }: ChatContentProps) {
   const [input, setInput] = useState("")
+  const { ensurePaidPlan, showUpgradeToast } = useBillingGate()
   const { messages, sendMessage, status, stop, error } = useChat({
     id: chatId,
     messages: initialMessages,
@@ -184,11 +187,25 @@ function ChatContent({
     }
   }, [messages, isGroup, selectedBotId, onSelectBot])
 
+  React.useEffect(() => {
+    if (error && isPlanRequiredError(error)) {
+      showUpgradeToast("A paid plan is required to chat with bots and use sandboxes.")
+    }
+  }, [error, showUpgradeToast])
+
   const selectedBot = bots.find((b) => b.id === selectedBotId) ?? bots[0]
 
   const handleSubmit = (message: PromptInputMessage) => {
     const text = message.text?.trim()
     if (!text) return
+
+    if (
+      !ensurePaidPlan(
+        "A paid plan is required to chat with bots and use sandboxes."
+      )
+    ) {
+      return
+    }
 
     sendMessage(
       isGroup && selectedBot

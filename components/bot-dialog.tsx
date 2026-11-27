@@ -33,6 +33,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { ChatAvatar } from "@/components/chat-avatar"
 import { createBot, deleteBot, updateBot } from "@/action/bot"
 import { toast } from "@/components/ui/toast"
+import { useBillingGate } from "@/hooks/use-billing-toast"
+import { isPlanRequiredError } from "@/lib/billing"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 
@@ -102,6 +104,7 @@ export function BotDialog({
   onSuccess,
 }: BotDialogProps) {
   const router = useRouter()
+  const { ensurePaidPlan, showUpgradeToast } = useBillingGate()
   const isEdit = Boolean(bot?.id)
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false)
   const isControlled = controlledOpen !== undefined
@@ -174,6 +177,13 @@ export function BotDialog({
 
   // Reset form when dialog opens/closes
   const handleOpenChange = (nextOpen: boolean) => {
+    if (
+      nextOpen &&
+      !isEdit &&
+      !ensurePaidPlan("A paid plan is required to create bots and sandboxes.")
+    ) {
+      return
+    }
     setServerError(null)
     setConfirmDeleteOpen(false)
     if (!nextOpen) {
@@ -265,6 +275,13 @@ export function BotDialog({
         router.refresh()
         onSuccess?.()
       } else {
+        if (
+          !ensurePaidPlan(
+            "A paid plan is required to create bots and sandboxes."
+          )
+        ) {
+          return
+        }
         const result = await createBot({
           name: values.name,
           job: values.job,
@@ -298,11 +315,15 @@ export function BotDialog({
             ? "Failed to update bot"
             : "Failed to create bot"
       setServerError(message)
-      toast.add({
-        title: isEdit ? "Failed to update bot" : "Failed to create bot",
-        description: message,
-        type: "error",
-      })
+      if (isPlanRequiredError(err)) {
+        showUpgradeToast("A paid plan is required to create bots and sandboxes.")
+      } else {
+        toast.add({
+          title: isEdit ? "Failed to update bot" : "Failed to create bot",
+          description: message,
+          type: "error",
+        })
+      }
     }
   }
 
