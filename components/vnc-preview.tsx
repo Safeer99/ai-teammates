@@ -13,6 +13,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { useBillingGate } from "@/hooks/use-billing-toast"
 import { PLAN_REQUIRED_ERROR_CODE, PLAN_REQUIRED_MESSAGE } from "@/lib/billing"
+import { USAGE_LIMIT_ERROR_CODE } from "@/lib/usage"
 import { cn } from "@/lib/utils"
 
 export interface VncPreviewProps {
@@ -26,8 +27,13 @@ export function VncPreview({
   botName = "Assistant",
   className,
 }: VncPreviewProps) {
-  const { isLoaded, hasPaidPlan, ensurePaidPlan, showUpgradeToast } =
-    useBillingGate()
+  const {
+    isLoaded,
+    hasPaidPlan,
+    ensurePaidPlan,
+    showUpgradeToast,
+    showUsageLimitToast,
+  } = useBillingGate()
   const [vncUrl, setVncUrl] = React.useState<string | null>(null)
   const [isLoading, setIsLoading] = React.useState(true)
   const [isRefreshing, setIsRefreshing] = React.useState(false)
@@ -84,6 +90,11 @@ export function VncPreview({
       if (result.code === PLAN_REQUIRED_ERROR_CODE) {
         showUpgradeToast(result.error || undefined)
         setError(result.error || PLAN_REQUIRED_MESSAGE)
+      } else if (result.code === USAGE_LIMIT_ERROR_CODE) {
+        showUsageLimitToast(
+          result.error || "Monthly sandbox compute allowance reached."
+        )
+        setError(result.error || "Monthly sandbox compute allowance reached.")
       } else if (result.error) {
         setError(result.error)
       } else if (result.url) {
@@ -102,7 +113,7 @@ export function VncPreview({
     } finally {
       setIsRefreshing(false)
     }
-  }, [chatId, ensurePaidPlan, showUpgradeToast])
+  }, [chatId, ensurePaidPlan, showUpgradeToast, showUsageLimitToast])
 
   const handleOpenChange = React.useCallback(
     (open: boolean, details?: { reason?: string }) => {

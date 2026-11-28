@@ -1,6 +1,7 @@
 import { relations } from "drizzle-orm";
 import {
   index,
+  integer,
   pgEnum,
   pgTable,
   primaryKey,
@@ -12,6 +13,10 @@ import { nanoid } from "nanoid";
 import type { z } from "zod";
 
 export const chatKindEnum = pgEnum("chat_kind", ["direct", "group"]);
+export const usageKindEnum = pgEnum("usage_kind", [
+  "ai_tokens",
+  "sandbox_compute",
+]);
 
 export const bots = pgTable(
   "bots",
@@ -119,3 +124,53 @@ export const selectChatMemberSchema = createSelectSchema(chatMembers);
 export type ChatMember = typeof chatMembers.$inferSelect;
 export type NewChatMember = typeof chatMembers.$inferInsert;
 export type InsertChatMember = z.infer<typeof insertChatMemberSchema>;
+
+export const subscriptionPeriods = pgTable("subscription_periods", {
+  userId: text("user_id").primaryKey(),
+  subscriptionId: text("subscription_id"),
+  planSlug: text("plan_slug"),
+  status: text("status"),
+  periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+  periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+});
+
+export const usageLedger = pgTable(
+  "usage_ledger",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => nanoid()),
+    userId: text("user_id").notNull(),
+    kind: usageKindEnum("kind").notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    botId: text("bot_id"),
+    chatId: text("chat_id"),
+    sandboxId: text("sandbox_id"),
+    model: text("model"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    sandboxSeconds: integer("sandbox_seconds").notNull().default(0),
+    costMicrodollars: integer("cost_microdollars").notNull().default(0),
+    description: text("description"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index("usage_ledger_user_period_idx").on(
+      table.userId,
+      table.periodStart,
+      table.periodEnd
+    ),
+    index("usage_ledger_created_at_idx").on(table.createdAt),
+  ]
+);
+
+export type SubscriptionPeriod = typeof subscriptionPeriods.$inferSelect;
+export type UsageLedgerEntry = typeof usageLedger.$inferSelect;
+export type NewUsageLedgerEntry = typeof usageLedger.$inferInsert;

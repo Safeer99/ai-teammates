@@ -8,6 +8,15 @@ import {
   PLAN_REQUIRED_MESSAGE,
 } from "@/lib/billing"
 import { getDaytonaClient } from "@/lib/daytona"
+import {
+  isUsageLimitError,
+  USAGE_LIMIT_ERROR_CODE,
+  VNC_SESSION_BILLABLE_SECONDS,
+} from "@/lib/usage"
+import {
+  assertWithinSandboxLimit,
+  recordSandboxComputeUsage,
+} from "@/lib/usage-server"
 
 export interface VncUrlResult {
   url: string | null
@@ -31,6 +40,21 @@ export async function getChatVncUrl(chatId: string): Promise<VncUrlResult> {
       sandboxId: null,
       error: PLAN_REQUIRED_MESSAGE,
       code: PLAN_REQUIRED_ERROR_CODE,
+    }
+  }
+
+  try {
+    await assertWithinSandboxLimit(userId)
+  } catch (error) {
+    return {
+      url: null,
+      botName: "Assistant",
+      sandboxId: null,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Monthly sandbox compute allowance reached.",
+      code: isUsageLimitError(error) ? USAGE_LIMIT_ERROR_CODE : null,
     }
   }
 
@@ -100,6 +124,22 @@ export async function getChatVncUrl(chatId: string): Promise<VncUrlResult> {
       ? signed.url.slice(0, -1)
       : signed.url
     const vncUrl = `${baseUrl}/vnc.html?autoconnect=true&resize=scale&reconnect=true`
+
+    try {
+      await recordSandboxComputeUsage({
+        userId,
+        botId: bot.id,
+        chatId,
+        sandboxId: bot.sandboxId,
+        seconds: VNC_SESSION_BILLABLE_SECONDS,
+        cpu: sandbox.cpu,
+        memoryGiB: sandbox.memory,
+        diskGiB: sandbox.disk,
+        description: `Desktop preview (${botName})`,
+      })
+    } catch (usageError) {
+      console.error("Failed to record VNC sandbox usage:", usageError)
+    }
 
     return {
       url: vncUrl,

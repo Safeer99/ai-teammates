@@ -9,6 +9,14 @@ import { db } from "@/db"
 import { requireAuthAndPaidPlan } from "@/lib/billing-server"
 import { getDaytonaClient } from "@/lib/daytona"
 import {
+  SANDBOX_AUTO_STOP_MINUTES,
+  SANDBOX_PROVISION_BILLABLE_SECONDS,
+} from "@/lib/usage"
+import {
+  assertWithinSandboxLimit,
+  recordSandboxComputeUsage,
+} from "@/lib/usage-server"
+import {
   bots,
   chats,
   chatMembers,
@@ -27,8 +35,12 @@ export type CreateBotInput = {
 export async function createBot(data: CreateBotInput) {
   const { userId } = await requireAuthAndPaidPlan()
 
+  await assertWithinSandboxLimit(userId, { checkMaxCount: true })
+
   const daytona = getDaytonaClient()
-  const sandbox = await daytona.create()
+  const sandbox = await daytona.create({
+    autoStopInterval: SANDBOX_AUTO_STOP_MINUTES,
+  })
 
   // Ensure sandbox is started and initialize blank MEMORY.md file on creation via bash touch
   try {
@@ -85,6 +97,22 @@ export async function createBot(data: CreateBotInput) {
   const newBot = botRows[0]
   const newChat = chatRows[0]
   const newMember = memberRows[0]
+
+  try {
+    await recordSandboxComputeUsage({
+      userId,
+      botId,
+      chatId,
+      sandboxId: sandbox.id,
+      seconds: SANDBOX_PROVISION_BILLABLE_SECONDS,
+      cpu: sandbox.cpu,
+      memoryGiB: sandbox.memory,
+      diskGiB: sandbox.disk,
+      description: `Provisioned sandbox for ${newBot.name}`,
+    })
+  } catch (usageError) {
+    console.error("Failed to record sandbox provisioning usage:", usageError)
+  }
 
   revalidatePath("/")
 

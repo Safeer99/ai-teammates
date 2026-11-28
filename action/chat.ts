@@ -10,6 +10,7 @@ import { z } from "zod"
 
 import { db } from "@/db"
 import { requireAuthAndPaidPlan } from "@/lib/billing-server"
+import { assertWithinAiLimit } from "@/lib/usage-server"
 import {
   chats,
   chatMembers,
@@ -168,7 +169,8 @@ export async function startChatSession(params: {
   chatId: string
   clientData?: unknown
 }) {
-  await requireAuthAndPaidPlan()
+  const { userId } = await requireAuthAndPaidPlan()
+  await assertWithinAiLimit(userId)
 
   const existingChat = await getChat(params.chatId)
   if (!existingChat) {
@@ -179,7 +181,8 @@ export async function startChatSession(params: {
 }
 
 export async function mintChatAccessToken(chatId: string) {
-  await requireAuthAndPaidPlan()
+  const { userId } = await requireAuthAndPaidPlan()
+  await assertWithinAiLimit(userId)
 
   const existingChat = await getChat(chatId)
   if (!existingChat) {

@@ -35,6 +35,7 @@ import { createBot, deleteBot, updateBot } from "@/action/bot"
 import { toast } from "@/components/ui/toast"
 import { useBillingGate } from "@/hooks/use-billing-toast"
 import { isPlanRequiredError } from "@/lib/billing"
+import { isUsageLimitError } from "@/lib/usage"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 
@@ -104,7 +105,8 @@ export function BotDialog({
   onSuccess,
 }: BotDialogProps) {
   const router = useRouter()
-  const { ensurePaidPlan, showUpgradeToast } = useBillingGate()
+  const { ensurePaidPlan, showUpgradeToast, showUsageLimitToast } =
+    useBillingGate()
   const isEdit = Boolean(bot?.id)
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false)
   const isControlled = controlledOpen !== undefined
@@ -317,6 +319,8 @@ export function BotDialog({
       setServerError(message)
       if (isPlanRequiredError(err)) {
         showUpgradeToast("A paid plan is required to create bots and sandboxes.")
+      } else if (isUsageLimitError(err)) {
+        showUsageLimitToast(message)
       } else {
         toast.add({
           title: isEdit ? "Failed to update bot" : "Failed to create bot",

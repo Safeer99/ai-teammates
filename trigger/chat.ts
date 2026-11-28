@@ -6,6 +6,11 @@ import { stepCountIs, type ToolSet } from "ai"
 import { db } from "../db"
 import { getDaytonaClient } from "../lib/daytona"
 import {
+  assertWithinAiLimit,
+  recordAiTokenUsage,
+  recordSandboxComputeUsage,
+} from "../lib/usage-server"
+import {
   createComputerUseTools,
   createHandoffTool,
   createRecallMemoryTool,
@@ -200,6 +205,8 @@ export const chatAgent = chat.agent({
     }
   },
   run: async ({ messages, tools, signal, streamText, chatId, clientData }) => {
+    const runStartedAt = Date.now()
+    let userId: string | null = null
     let bot: BotInfo | null = null
     let allBots: BotInfo[] = []
     let chatInfo: ChatInfo | null = null
@@ -219,6 +226,7 @@ export const chatAgent = chat.agent({
         },
       })
       if (chatRecord) {
+        userId = chatRecord.userId
         chatInfo = {
           id: chatRecord.id,
           kind: chatRecord.kind,
@@ -238,6 +246,10 @@ export const chatAgent = chat.agent({
       }
     } catch (error) {
       console.error("Failed to fetch bot details for system prompt:", error)
+    }
+
+    if (userId) {
+      await assertWithinAiLimit(userId)
     }
 
     if (bot) {
@@ -287,6 +299,49 @@ export const chatAgent = chat.agent({
       },
       abortSignal: signal,
       stopWhen: stepCountIs(15),
+      onEnd: async ({ usage, steps }) => {
+        if (!userId) return
+
+        try {
+          await recordAiTokenUsage({
+            userId,
+            botId: bot?.id,
+            chatId,
+            model: modelName,
+            inputTokens: usage.inputTokens ?? 0,
+            cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens ?? 0,
+            outputTokens: usage.outputTokens ?? 0,
+            description: `Chat turn (${bot?.name ?? "Assistant"})`,
+          })
+        } catch (usageError) {
+          console.error("Failed to record AI token usage:", usageError)
+        }
+
+        const usedSandboxTools = steps.some((step) =>
+          step.toolCalls.some((call) => call.toolName !== "handoff")
+        )
+        if (usedSandboxTools && bot?.sandboxId) {
+          const elapsedSeconds = Math.max(
+            1,
+            Math.round((Date.now() - runStartedAt) / 1000)
+          )
+          try {
+            await recordSandboxComputeUsage({
+              userId,
+              botId: bot.id,
+              chatId,
+              sandboxId: bot.sandboxId,
+              seconds: elapsedSeconds,
+              description: `Agent sandbox execution (${bot.name})`,
+            })
+          } catch (sandboxUsageError) {
+            console.error(
+              "Failed to record agent sandbox usage:",
+              sandboxUsageError
+            )
+          }
+        }
+      },
     })
   },
 })

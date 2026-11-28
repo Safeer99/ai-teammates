@@ -30,6 +30,23 @@ export function useBillingGate() {
     [router]
   )
 
+  const showUsageLimitToast = React.useCallback(
+    (description: string) => {
+      toast.add({
+        title: "Usage limit reached",
+        description,
+        type: "error",
+        actionProps: {
+          children: "View usage",
+          onClick: () => {
+            router.push("/usage")
+          },
+        },
+      })
+    },
+    [router]
+  )
+
   const ensurePaidPlan = React.useCallback(
     (description?: string) => {
       if (!isLoaded) return false
@@ -46,6 +63,7 @@ export function useBillingGate() {
     isLoaded,
     hasPaidPlan,
     showUpgradeToast,
+    showUsageLimitToast,
     ensurePaidPlan,
   }
 }

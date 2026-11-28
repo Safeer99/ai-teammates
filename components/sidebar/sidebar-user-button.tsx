@@ -1,6 +1,7 @@
 "use client"
 
 import { UserButton } from "@clerk/nextjs"
+import { GaugeIcon } from "lucide-react"
 
 import {
   SidebarMenu,
@@ -36,7 +37,15 @@ export function SidebarUserButton() {
                     "truncate! ps-0! text-left! text-sm! font-normal! text-inherit! group-data-[collapsible=icon]:hidden!",
                 },
               }}
-            />
+            >
+              <UserButton.MenuItems>
+                <UserButton.Link
+                  label="Usage"
+                  labelIcon={<GaugeIcon className="size-4" />}
+                  href="/usage"
+                />
+              </UserButton.MenuItems>
+            </UserButton>
           ) : (
             <div className="flex h-8 w-full items-center gap-2 rounded-md p-2 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:justify-center! group-data-[collapsible=icon]:p-0!">
               <div className="size-6 shrink-0 animate-pulse rounded-full bg-sidebar-accent/50" />
